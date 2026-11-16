@@ -1,0 +1,24 @@
+[package]
+name = "opencal-core"
+description = "opencal's calendar store: iCalendar file with tombstones, merge/diff and command-based sync (Rust crate and C library)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lib]
+# Rust users get the `opencal` crate; C/C++ users get libopencal.so + include/opencal.h.
+name = "opencal"
+crate-type = ["rlib", "cdylib"]
+
+[dependencies]
+anyhow.workspace = true
+chrono.workspace = true
+chrono-tz.workspace = true
+dirs.workspace = true
+rrule.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+uuid.workspace = true

@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=opencal
+GenericName=Calendar
+Comment=Local calendar and task manager with command-based sync
+Exec=opencal
+Icon=org.opencal.OpenCal
+Terminal=false
+Categories=Office;Calendar;ProjectManagement;GTK;
+Keywords=event;task;todo;agenda;ical;ics;schedule;
+StartupNotify=true
+MimeType=text/calendar;

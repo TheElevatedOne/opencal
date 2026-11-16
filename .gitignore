@@ -1,0 +1,9 @@
+/target/
+/dist/
+/screenshots/
+# makepkg output
+/aur/*/src/
+/aur/*/pkg/
+/aur/*/opencal/
+/aur/*/*.tar.*
+/aur/*/*.log

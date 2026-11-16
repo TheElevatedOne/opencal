@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>org.opencal.OpenCal</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <name>opencal</name>
+  <summary>Local calendar and task manager with command-based sync</summary>
+  <description>
+    <p>
+      opencal is a calendar and to-do list that keeps everything on your computer, in a plain
+      iCalendar (.ics) file. There are no online accounts. To share the calendar between computers,
+      opencal runs your own pull and push commands (rclone, scp, git, curl, a script) and merges
+      the two copies, keeping additions, edits, deletions and completed tasks from both sides.
+    </p>
+    <ul>
+      <li>Day, week, month, agenda and task views</li>
+      <li>Several calendars with colours</li>
+      <li>Repeating events, all-day and multi-day events, tasks with due dates and priorities</li>
+      <li>Drag to create, move and resize events</li>
+      <li>Import and export of iCalendar files</li>
+      <li>A C and Rust library (libopencal) for other programs</li>
+    </ul>
+  </description>
+  <launchable type="desktop-id">org.opencal.OpenCal.desktop</launchable>
+  <url type="homepage">https://github.com/TheElevatedOne/opencal</url>
+  <url type="bugtracker">https://github.com/TheElevatedOne/opencal/issues</url>
+  <developer id="io.github.theelevatedone">
+    <name>TheElevatedOne</name>
+  </developer>
+  <provides>
+    <binary>opencal</binary>
+    <library>libopencal.so.0</library>
+  </provides>
+  <categories>
+    <category>Office</category>
+    <category>Calendar</category>
+  </categories>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="0.1.0" date="2026-11-16">
+      <description>
+        <p>First release.</p>
+      </description>
+    </release>
+  </releases>
+</component>

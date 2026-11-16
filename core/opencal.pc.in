@@ -1,0 +1,10 @@
+prefix=@PREFIX@
+libdir=${prefix}/lib
+includedir=${prefix}/include
+
+Name: opencal
+Description: Calendar store of opencal: iCalendar file with merge and command-based sync
+URL: https://github.com/TheElevatedOne/opencal
+Version: @VERSION@
+Libs: -L${libdir} -lopencal
+Cflags: -I${includedir}

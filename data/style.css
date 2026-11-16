@@ -1,0 +1,212 @@
+/* opencal: colours come from the GTK theme's named colours (so pywal themes apply), corners are
+   square and backgrounds opaque. Calendar colours are added at run time (.cal-N classes). */
+
+* {
+  border-radius: 0;
+}
+
+window.opencal {
+  background-color: @theme_bg_color;
+  color: @theme_fg_color;
+}
+
+.toolbar {
+  padding: 6px 8px;
+  border-bottom: 1px solid @borders;
+  background-color: @theme_bg_color;
+}
+
+.view-title {
+  font-size: 1.3em;
+  font-weight: 700;
+  margin: 0 8px;
+}
+
+.statusbar {
+  padding: 3px 10px;
+  border-top: 1px solid @borders;
+  font-size: 0.9em;
+}
+
+.sidebar {
+  padding: 8px;
+  border-right: 1px solid @borders;
+  background-color: @theme_bg_color;
+}
+
+.section-title {
+  font-weight: 700;
+  margin-top: 6px;
+}
+
+.title-3 { font-size: 1.2em; font-weight: 700; }
+.caption { font-size: 0.9em; }
+.monospace { font-family: monospace; }
+.dim-label { opacity: 0.65; }
+.error-text { color: @error_color; }
+.done { text-decoration: line-through; opacity: 0.6; }
+
+.calendar-list,
+.calendar-list > row {
+  background-color: transparent;
+}
+
+.calendar-row {
+  padding: 2px 0;
+}
+
+.swatch {
+  min-width: 12px;
+  min-height: 12px;
+}
+
+/* Month view */
+.month-header .weekday {
+  padding: 6px 0;
+  font-weight: 700;
+  opacity: 0.75;
+}
+
+.month-grid {
+  background-color: @theme_base_color;
+  border-top: 1px solid @borders;
+}
+
+.day-cell {
+  background-color: @theme_base_color;
+  color: @theme_text_color;
+  border-right: 1px solid mix(@borders, @theme_base_color, 0.4);
+  border-bottom: 1px solid mix(@borders, @theme_base_color, 0.4);
+  padding: 2px 3px;
+}
+
+.day-cell.other-month {
+  background-color: mix(@theme_base_color, @theme_bg_color, 0.6);
+}
+
+.day-cell.other-month .day-number {
+  opacity: 0.5;
+}
+
+.day-cell.selected {
+  background-color: mix(@theme_base_color, @theme_selected_bg_color, 0.12);
+}
+
+.day-cell.today .day-number {
+  background-color: @theme_selected_bg_color;
+  color: @theme_selected_fg_color;
+  font-weight: 700;
+}
+
+.day-number {
+  padding: 0 6px;
+  min-height: 0;
+  min-width: 0;
+}
+
+.event-pill,
+.event-dot,
+.more {
+  padding: 1px 4px;
+  min-height: 0;
+  margin: 0;
+  font-size: 0.92em;
+}
+
+.event-pill {
+  background-image: none;
+  border: none;
+  box-shadow: none;
+}
+
+.event-pill:hover {
+  opacity: 0.85;
+}
+
+.event-dot {
+  color: @theme_text_color;
+}
+
+.event-dot > box > .dot {
+  font-size: 0.8em;
+}
+
+.more {
+  opacity: 0.7;
+}
+
+/* Lists */
+.page {
+  padding: 16px;
+}
+
+.panel {
+  background-color: @theme_base_color;
+  border: 1px solid @borders;
+}
+
+list.panel,
+list.panel > row {
+  background-color: @theme_base_color;
+  color: @theme_text_color;
+}
+
+list.panel > row {
+  padding: 7px 12px;
+  border-bottom: 1px solid mix(@borders, @theme_base_color, 0.5);
+}
+
+list.panel > row:last-child {
+  border-bottom: none;
+}
+
+list.panel > row.activatable:hover {
+  background-color: mix(@theme_base_color, @theme_text_color, 0.06);
+}
+
+list.agenda > row.agenda-day {
+  background-color: mix(@theme_base_color, @theme_bg_color, 0.6);
+  font-weight: 700;
+  padding-top: 10px;
+}
+
+.badge {
+  background-color: @theme_selected_bg_color;
+  color: @theme_selected_fg_color;
+  padding: 1px 6px;
+  font-size: 0.85em;
+}
+
+.badge.priority-high,
+.badge.change-deleted {
+  background-color: @error_color;
+  color: @theme_base_color;
+}
+
+.badge.priority-low,
+.badge.change-changed,
+.badge.change-reopened {
+  background-color: mix(@theme_bg_color, @theme_fg_color, 0.35);
+  color: @theme_base_color;
+}
+
+/* Dialogs */
+.dialog-content {
+  padding: 16px;
+}
+
+.dialog-buttons {
+  margin-top: 6px;
+}
+
+.field-label {
+  opacity: 0.8;
+}
+
+window.dialog-window {
+  border: 1px solid @borders;
+}
+
+.time-grid-header {
+  background-color: @theme_bg_color;
+}

@@ -1,0 +1,19 @@
+[package]
+name = "opencal"
+description = "Local calendar and task manager for GTK 4 with command-based sync"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "opencal"
+path = "src/main.rs"
+
+[dependencies]
+opencal-core = { path = "../core" }
+anyhow.workspace = true
+chrono.workspace = true
+gtk = { package = "gtk4", version = "0.11", features = ["v4_14"] }
+pangocairo = "0.22"

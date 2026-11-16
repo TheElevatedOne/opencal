@@ -1,0 +1,6 @@
+cmake_minimum_required(VERSION 3.16)
+project(opencal_agenda C)
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(OPENCAL REQUIRED IMPORTED_TARGET opencal)
+add_executable(agenda agenda.c)
+target_link_libraries(agenda PRIVATE PkgConfig::OPENCAL)

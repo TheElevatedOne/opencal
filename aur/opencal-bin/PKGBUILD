@@ -1,0 +1,40 @@
+# Maintainer: TheElevatedOne <adam.mlady@elevated.ovh>
+
+pkgname=opencal-bin
+_pkgname=opencal
+pkgver=0.1.0
+pkgrel=1
+pkgdesc='Local calendar and task manager for GTK 4 with command-based sync, plus libopencal for C and Rust (prebuilt)'
+arch=('x86_64')
+url='https://github.com/TheElevatedOne/opencal'
+license=('GPL-3.0-or-later')
+depends=(
+  'cairo'
+  'gcc-libs'
+  'glib2'
+  'glibc'
+  'graphene'
+  'gtk4'
+  'pango'
+)
+optdepends=(
+  'rclone: sync through cloud storage (example script)'
+  'openssh: sync with an ssh server (example script)'
+  'curl: sync with WebDAV (example script)'
+  'git: sync through a git repository (example script)'
+  'libnotify: desktop notification after a sync (example script)'
+)
+provides=("$_pkgname=$pkgver" 'libopencal.so=0-64')
+conflicts=("$_pkgname")
+# Built and stripped on Arch Linux by the upstream release workflow. Tags have no "v".
+options=('!debug' '!strip')
+source=("$_pkgname-$pkgver-linux-x86_64.tar.gz::$url/releases/download/$pkgver/$_pkgname-$pkgver-linux-x86_64.tar.gz")
+sha256sums=('SKIP')
+
+package() {
+  cd "$_pkgname-$pkgver-linux-$CARCH"
+  install -d "$pkgdir/usr"
+  cp -a bin include lib share "$pkgdir/usr/"
+  install -Dm644 README.md CHANGELOG.md -t "$pkgdir/usr/share/doc/$_pkgname"
+  install -Dm644 LICENSE -t "$pkgdir/usr/share/licenses/$pkgname"
+}

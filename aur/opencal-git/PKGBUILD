@@ -1,0 +1,65 @@
+# Maintainer: TheElevatedOne <adam.mlady@elevated.ovh>
+
+pkgname=opencal-git
+_pkgname=opencal
+pkgver=0.1.0_r0_g0000000
+pkgrel=1
+pkgdesc='Local calendar and task manager for GTK 4 with command-based sync, plus libopencal for C and Rust (git version)'
+arch=('x86_64' 'aarch64')
+url='https://github.com/TheElevatedOne/opencal'
+license=('GPL-3.0-or-later')
+depends=(
+  'cairo'
+  'gcc-libs'
+  'glib2'
+  'glibc'
+  'graphene'
+  'gtk4'
+  'pango'
+)
+makedepends=('cargo' 'git')
+optdepends=(
+  'rclone: sync through cloud storage (example script)'
+  'openssh: sync with an ssh server (example script)'
+  'curl: sync with WebDAV (example script)'
+  'git: sync through a git repository (example script)'
+  'libnotify: desktop notification after a sync (example script)'
+)
+provides=("$_pkgname" 'libopencal.so=0-64')
+conflicts=("$_pkgname")
+options=('!lto')
+source=("$_pkgname::git+$url.git")
+sha256sums=('SKIP')
+
+pkgver() {
+  cd "$_pkgname"
+  set -o pipefail
+  git describe --long --tags --abbrev=7 2>/dev/null | sed 's/\([^-]*-g\)/r\1/;s/-/_/g' ||
+    printf 'r%s.g%s' "$(git rev-list --count HEAD)" "$(git rev-parse --short=7 HEAD)"
+}
+
+prepare() {
+  cd "$_pkgname"
+  export RUSTUP_TOOLCHAIN=stable
+  cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
+}
+
+build() {
+  cd "$_pkgname"
+  export RUSTUP_TOOLCHAIN=stable
+  export CARGO_TARGET_DIR=target
+  cargo build --frozen --release --workspace
+}
+
+check() {
+  cd "$_pkgname"
+  export RUSTUP_TOOLCHAIN=stable
+  cargo test --frozen --workspace
+}
+
+package() {
+  cd "$_pkgname"
+  make PREFIX=/usr DESTDIR="$pkgdir" install
+  install -Dm644 README.md CHANGELOG.md -t "$pkgdir/usr/share/doc/$_pkgname"
+  install -Dm644 LICENSE -t "$pkgdir/usr/share/licenses/$pkgname"
+}

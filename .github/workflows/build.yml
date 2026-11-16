@@ -1,0 +1,153 @@
+# Builds opencal and libopencal on Arch Linux, runs the tests, the self-test (under Broadway, no
+# real display) and a C program against the installed library, and renders screenshots.
+# Pushing a tag such as 0.1.0 also publishes a GitHub release with the x86_64 tarball, which the
+# opencal-bin AUR package downloads. The release notes are the tag's section in CHANGELOG.md.
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ["[0-9]*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build (Arch Linux x86_64)
+    runs-on: ubuntu-24.04
+    container: archlinux:base-devel
+    steps:
+      - name: Install dependencies
+        run: |
+          pacman -Syu --noconfirm --needed git rust gtk4 pkgconf desktop-file-utils appstream \
+            ttf-dejavu adwaita-icon-theme
+
+      - uses: actions/checkout@v4
+
+      - name: Version
+        id: version
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n1)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if [ "${GITHUB_REF_TYPE}" = "tag" ] && [ "${GITHUB_REF_NAME}" != "$version" ]; then
+            echo "::error::Tag ${GITHUB_REF_NAME} does not match the version $version in Cargo.toml"
+            exit 1
+          fi
+          if ! grep -qx "## $version" CHANGELOG.md; then
+            echo "::error::CHANGELOG.md has no \"## $version\" section"
+            exit 1
+          fi
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-arch-${{ hashFiles('Cargo.lock') }}
+
+      - name: Build
+        run: make build
+
+      - name: Lint
+        run: |
+          cargo fmt --all --check || echo "::warning::cargo fmt would change files"
+          cargo clippy --workspace --release --locked
+
+      - name: Test
+        run: |
+          cargo test --workspace --release --locked
+          ./target/release/opencal --version
+          ./target/release/opencal --help >/dev/null
+          desktop-file-validate data/org.opencal.OpenCal.desktop
+          appstreamcli validate --no-net data/org.opencal.OpenCal.metainfo.xml
+          for f in examples/sync/*.sh packaging/*.sh; do sh -n "$f"; done
+
+      - name: Self-test and screenshots (Broadway)
+        run: |
+          export XDG_RUNTIME_DIR=$(mktemp -d) GDK_BACKEND=broadway BROADWAY_DISPLAY=:5 GTK_A11Y=none GDK_DEBUG=no-portals
+          gtk4-broadwayd :5 &
+          sleep 2
+          ./target/release/opencal --self-test
+          mkdir -p screenshots
+          for view in month week day agenda tasks; do
+            ./target/release/opencal --screenshot "screenshots/$view.png" "$view"
+          done
+
+      - name: CLI round trip
+        run: |
+          p=$(mktemp -d)
+          ./target/release/opencal --profile "$p" --add-task "CI task"
+          ./target/release/opencal --profile "$p" --export - | grep -q "SUMMARY:CI task"
+          # Sync against a folder, twice, from two profiles.
+          remote=$(mktemp -d)
+          for prof in "$p" "$(mktemp -d)"; do
+            printf '[sync]\npull = "[ ! -e %s/c.ics ] || cp %s/c.ics \\"$CAL_DB_PULL\\""\npush = "cp \\"$CAL_DB\\" %s/c.ics"\n' \
+              "$remote" "$remote" "$remote" > "$prof/config.toml"
+            ./target/release/opencal --profile "$prof" --sync
+            ./target/release/opencal --profile "$prof" --export - | grep -q "SUMMARY:CI task"
+          done
+
+      - name: Install and build the C example
+        run: |
+          stage=$(mktemp -d)
+          make install PREFIX=/usr DESTDIR="$stage"
+          export PKG_CONFIG_SYSROOT_DIR="$stage" PKG_CONFIG_PATH="$stage/usr/lib/pkgconfig"
+          cc -Wall -Wextra -Werror examples/c/agenda.c -o agenda $(pkg-config --cflags --libs opencal)
+          LD_LIBRARY_PATH="$stage/usr/lib" OPENCAL_PROFILE=$(mktemp -d) ./agenda "C task" | grep -q "added task"
+          readelf -d "$stage/usr/lib/libopencal.so.${{ steps.version.outputs.version }}" | grep -q "SONAME.*libopencal.so.0"
+
+      - name: Package
+        run: packaging/make-release-tarball.sh "${{ steps.version.outputs.version }}" x86_64
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: opencal-linux-x86_64
+          path: dist/*
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: screenshots/*
+
+  release:
+    name: Publish release
+    needs: build
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: opencal-linux-x86_64
+          path: dist
+
+      - name: Release notes
+        run: |
+          # The lines between "## <tag>" and the next "## " heading.
+          awk -v v="$GITHUB_REF_NAME" '
+            /^## / { if (found) exit; if ($0 == "## " v) { found = 1; next } }
+            found { print }
+          ' CHANGELOG.md > release-notes.md
+          if [ ! -s release-notes.md ]; then
+            echo "::error::CHANGELOG.md has no \"## $GITHUB_REF_NAME\" section"
+            exit 1
+          fi
+          cat release-notes.md
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" dist/* --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" dist/* --title "opencal $GITHUB_REF_NAME" --notes-file release-notes.md
+          fi

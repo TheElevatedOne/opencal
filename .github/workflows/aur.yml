@@ -1,0 +1,36 @@
+# Builds the AUR packages in aur/ with makepkg to catch PKGBUILD mistakes. Publishing to the AUR
+# happens elsewhere (TheElevatedOne/AUR-PKGBUILDs).
+name: AUR packages
+
+on:
+  push:
+    branches: [main]
+    paths: ["aur/**", "Makefile", ".github/workflows/aur.yml"]
+  pull_request:
+    paths: ["aur/**", "Makefile"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  git:
+    name: opencal-git
+    runs-on: ubuntu-24.04
+    container: archlinux:base-devel
+    steps:
+      - name: Install tools
+        run: pacman -Syu --noconfirm --needed git namcap
+      - uses: actions/checkout@v4
+      - name: makepkg
+        run: |
+          useradd -m builder
+          echo 'builder ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/builder
+          cp -r aur/opencal-git /home/builder/pkg
+          chown -R builder /home/builder/pkg
+          cd /home/builder/pkg
+          # Build the pushed commit, not the default branch.
+          sed -i "s|git+\$url.git|git+$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git#commit=$GITHUB_SHA|" PKGBUILD
+          sudo -u builder makepkg -s --noconfirm
+          sudo -u builder makepkg --printsrcinfo > /dev/null
+          namcap PKGBUILD *.pkg.tar.zst || true

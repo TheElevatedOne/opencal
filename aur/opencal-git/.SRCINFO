@@ -1,0 +1,30 @@
+pkgbase = opencal-git
+	pkgdesc = Local calendar and task manager for GTK 4 with command-based sync, plus libopencal for C and Rust (git version)
+	pkgver = 0.1.0_r0_g0000000
+	pkgrel = 1
+	url = https://github.com/TheElevatedOne/opencal
+	arch = x86_64
+	arch = aarch64
+	license = GPL-3.0-or-later
+	makedepends = cargo
+	makedepends = git
+	depends = cairo
+	depends = gcc-libs
+	depends = glib2
+	depends = glibc
+	depends = graphene
+	depends = gtk4
+	depends = pango
+	optdepends = rclone: sync through cloud storage (example script)
+	optdepends = openssh: sync with an ssh server (example script)
+	optdepends = curl: sync with WebDAV (example script)
+	optdepends = git: sync through a git repository (example script)
+	optdepends = libnotify: desktop notification after a sync (example script)
+	provides = opencal
+	provides = libopencal.so=0-64
+	conflicts = opencal
+	options = !lto
+	source = opencal::git+https://github.com/TheElevatedOne/opencal.git
+	sha256sums = SKIP
+
+pkgname = opencal-git
