@@ -2,7 +2,7 @@
 
 pkgname=opencal-git
 _pkgname=opencal
-pkgver=0.1.0_r0_g0000000
+pkgver=r2.ga75661e
 pkgrel=1
 pkgdesc='Local calendar and task manager for GTK 4 with command-based sync, plus libopencal for C and Rust (git version)'
 arch=('x86_64' 'aarch64')
