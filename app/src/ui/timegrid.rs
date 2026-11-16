@@ -386,20 +386,14 @@ impl TimeGrid {
         *self.state.colors.borrow_mut() = colors;
 
         // Lanes of the all-day strip.
-        let banners: Vec<_> = occs.iter().filter(|o| is_banner(o)).collect();
-        let mut lane_ends: Vec<i64> = Vec::new();
-        for o in &banners {
-            let (a, b) = banner_span(o, start, self.state.days);
-            match lane_ends.iter().position(|e| *e < a) {
-                Some(i) => lane_ends[i] = b,
-                None => lane_ends.push(b),
-            }
-        }
-        self.state.lanes.set(lane_ends.len());
+        let lanes = banner_lanes(&occs, start, self.state.days)
+            .iter()
+            .map(|l| l.3 + 1)
+            .max()
+            .unwrap_or(0);
+        self.state.lanes.set(lanes);
         self.header.set_content_height(
-            (DAYNAME_H
-                + lane_ends.len() as f64 * LANE_H
-                + if lane_ends.is_empty() { 0.0 } else { 6.0 }) as i32,
+            (DAYNAME_H + lanes as f64 * LANE_H + if lanes == 0 { 0.0 } else { 6.0 }) as i32,
         );
         *self.state.occs.borrow_mut() = occs;
         self.header.queue_draw();
@@ -407,18 +401,54 @@ impl TimeGrid {
 
         if !self.state.scrolled.get() {
             let hour = app.config.borrow().view.day_start_hour.min(23) as f64;
-            let adj = self.scroller.vadjustment();
+            // Scroll once the hour grid has its real size (after the first layout).
             let st = self.state.clone();
-            let apply = move |adj: &gtk::Adjustment| {
-                if !st.scrolled.get() && adj.upper() > adj.page_size() && adj.page_size() > 0.0 {
-                    adj.set_value(hour * HOUR_H);
-                    st.scrolled.set(true);
+            self.scroller.add_tick_callback(move |sw, _| {
+                let adj = sw.vadjustment();
+                if st.scrolled.get() {
+                    return glib::ControlFlow::Break;
                 }
-            };
-            apply(&adj);
-            adj.connect_changed(apply);
+                if adj.page_size() > 0.0 && adj.upper() > adj.page_size() {
+                    adj.set_value((hour * HOUR_H).min(adj.upper() - adj.page_size()));
+                    st.scrolled.set(true);
+                    return glib::ControlFlow::Break;
+                }
+                glib::ControlFlow::Continue
+            });
         }
     }
+}
+
+/// The all-day strip's entries as (index into `occs`, first column, last column, lane), packed
+/// greedily from the leftmost start so short entries share lanes.
+fn banner_lanes(occs: &[Occurrence], start: NaiveDate, days: i64) -> Vec<(usize, i64, i64, usize)> {
+    let mut spans: Vec<(usize, i64, i64)> = occs
+        .iter()
+        .enumerate()
+        .filter(|(_, o)| is_banner(o))
+        .map(|(i, o)| {
+            let (a, b) = banner_span(o, start, days);
+            (i, a, b)
+        })
+        .collect();
+    spans.sort_by_key(|&(i, a, b)| (a, -(b - a), i));
+    let mut lane_ends: Vec<i64> = Vec::new();
+    spans
+        .into_iter()
+        .map(|(i, a, b)| {
+            let lane = match lane_ends.iter().position(|e| *e < a) {
+                Some(l) => {
+                    lane_ends[l] = b;
+                    l
+                }
+                None => {
+                    lane_ends.push(b);
+                    lane_ends.len() - 1
+                }
+            };
+            (i, a, b, lane)
+        })
+        .collect()
 }
 
 /// First and last column (inclusive) a banner covers.
@@ -476,19 +506,9 @@ fn draw_header(st: &State, area: &gtk::DrawingArea, cr: &cairo::Context, w: f64,
     }
     // All-day strip.
     let mut hits = Vec::new();
-    let mut lane_ends: Vec<i64> = Vec::new();
-    for o in st.occs.borrow().iter().filter(|o| is_banner(o)) {
-        let (a, b) = banner_span(o, st.start.get(), st.days);
-        let lane = match lane_ends.iter().position(|e| *e < a) {
-            Some(i) => {
-                lane_ends[i] = b;
-                i
-            }
-            None => {
-                lane_ends.push(b);
-                lane_ends.len() - 1
-            }
-        };
+    let occs = st.occs.borrow();
+    for (i, a, b, lane) in banner_lanes(&occs, st.start.get(), st.days) {
+        let o = &occs[i];
         let x = GUTTER + a as f64 * col + 2.0;
         let y = DAYNAME_H + lane as f64 * LANE_H;
         let bw = (b - a + 1) as f64 * col - 4.0;

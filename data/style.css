@@ -210,3 +210,9 @@ window.dialog-window {
 .time-grid-header {
   background-color: @theme_bg_color;
 }
+
+.dialog-title {
+  font-weight: 700;
+  font-size: 1.1em;
+  padding: 10px 16px 0 16px;
+}

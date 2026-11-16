@@ -417,7 +417,7 @@ pub fn open_event(
         left.append(&dup);
     }
     content.append(&button_row(Some(left.upcast_ref()), &[&cancel, &save]));
-    window.set_child(Some(&content));
+    window.set_child(Some(&widgets::titled(&window, &content)));
     window.set_default_widget(Some(&save));
 
     {
@@ -750,7 +750,7 @@ pub fn open_task(app: &Rc<App>, existing: Option<Item>, template: Option<Item>) 
         },
         &[&cancel, &save],
     ));
-    window.set_child(Some(&content));
+    window.set_child(Some(&widgets::titled(&window, &content)));
     window.set_default_widget(Some(&save));
     {
         let w = window.clone();

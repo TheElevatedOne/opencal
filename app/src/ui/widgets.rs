@@ -189,6 +189,7 @@ pub fn dialog_window(parent: &impl IsA<gtk::Window>, title: &str) -> gtk::Window
         .build();
     w.add_css_class("opencal");
     w.add_css_class("dialog-window");
+    w.set_decorated(false);
     let esc = gtk::EventControllerKey::new();
     let ww = w.clone();
     esc.connect_key_pressed(move |_, key, _, _| {
@@ -248,4 +249,14 @@ pub fn error(parent: &impl IsA<gtk::Window>, message: &str, detail: &str) {
         .modal(true)
         .build()
         .show(Some(parent));
+}
+
+/// A dialog's content with its title on top (dialogs have no title bar).
+pub fn titled(window: &gtk::Window, content: &impl IsA<gtk::Widget>) -> gtk::Box {
+    let b = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    let title = label(&window.title().map(|t| t.to_string()).unwrap_or_default());
+    title.add_css_class("dialog-title");
+    b.append(&title);
+    b.append(content);
+    b
 }

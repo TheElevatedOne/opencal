@@ -122,6 +122,8 @@ impl App {
             .default_height(config.view.height.max(300))
             .build();
         window.add_css_class("opencal");
+        // No client-side title bar: the window manager (Hyprland) handles the window.
+        window.set_decorated(false);
 
         let colors_css = gtk::CssProvider::new();
         if let Some(display) = gdk::Display::default() {
@@ -225,15 +227,13 @@ impl App {
             .active(self.config.borrow().view.sidebar)
             .action_name("win.toggle-sidebar")
             .build();
-        let new_event = gtk::Button::builder()
-            .label("New Event")
-            .action_name("win.new-event")
-            .tooltip_text("New event (Ctrl+N)")
-            .build();
-        let new_task = gtk::Button::builder()
-            .label("New Task")
-            .action_name("win.new-task")
-            .tooltip_text("New task (Ctrl+T)")
+        let new_menu = gio::Menu::new();
+        new_menu.append(Some("Event"), Some("win.new-event"));
+        new_menu.append(Some("Task"), Some("win.new-task"));
+        let new_button = gtk::MenuButton::builder()
+            .label("New")
+            .menu_model(&new_menu)
+            .tooltip_text("New event (Ctrl+N) or task (Ctrl+T)")
             .build();
         let nav = gtk::Box::new(gtk::Orientation::Horizontal, 0);
         nav.add_css_class("linked");
@@ -260,6 +260,7 @@ impl App {
         );
         self.title.add_css_class("view-title");
         self.title.set_hexpand(true);
+        self.title.set_width_chars(14);
         self.title.set_xalign(0.0);
         self.title.set_ellipsize(gtk::pango::EllipsizeMode::End);
 
@@ -324,8 +325,7 @@ impl App {
         menu_button.set_primary(true);
 
         bar.append(&sidebar_toggle);
-        bar.append(&new_event);
-        bar.append(&new_task);
+        bar.append(&new_button);
         bar.append(&nav);
         bar.append(&self.title);
         bar.append(&self.spinner);
@@ -337,6 +337,9 @@ impl App {
         // Sidebar
         self.sidebar.add_css_class("sidebar");
         self.sidebar.set_width_request(240);
+        // Set explicitly so expanding children (labels, lists) don't make the sidebar take half
+        // the window.
+        self.sidebar.set_hexpand(false);
         self.mini.add_css_class("mini-calendar");
         {
             let app = self.weak();
@@ -1153,6 +1156,7 @@ impl App {
             .logo_icon_name("org.opencal.OpenCal")
             .build();
         about.add_css_class("opencal");
+        about.set_decorated(false);
         about.present();
     }
 
@@ -1184,7 +1188,7 @@ impl App {
             grid.attach(&key, 0, i as i32, 1, 1);
             grid.attach(&widgets::label(d), 1, i as i32, 1, 1);
         }
-        w.set_child(Some(&grid));
+        w.set_child(Some(&widgets::titled(&w, &grid)));
         w.present();
     }
 

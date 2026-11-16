@@ -128,7 +128,7 @@ pub fn open_sync_settings(app: &Rc<App>) {
     let save_sync = gtk::Button::with_label("Save and Sync");
     save_sync.add_css_class("suggested-action");
     content.append(&button_row(None, &[&cancel, &save, &save_sync]));
-    window.set_child(Some(&content));
+    window.set_child(Some(&widgets::titled(&window, &content)));
 
     {
         let w = window.clone();
@@ -290,7 +290,7 @@ pub fn show_sync_result(app: &Rc<App>, what: &str, result: &sync::SyncResult) {
         None
     };
     content.append(&button_row(left, &[&close]));
-    window.set_child(Some(&content));
+    window.set_child(Some(&widgets::titled(&window, &content)));
     window.set_default_widget(Some(&close));
     {
         let w = window.clone();
@@ -383,7 +383,7 @@ pub fn open_calendar(app: &Rc<App>, uid: Option<&str>) {
         },
         &[&cancel, &save],
     ));
-    window.set_child(Some(&content));
+    window.set_child(Some(&widgets::titled(&window, &content)));
     window.set_default_widget(Some(&save));
     {
         let w = window.clone();
