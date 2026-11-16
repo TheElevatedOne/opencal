@@ -30,7 +30,6 @@ window.opencal {
 
 .sidebar {
   padding: 8px;
-  border-right: 1px solid @borders;
   background-color: @theme_bg_color;
 }
 
@@ -48,7 +47,8 @@ window.opencal {
 
 .calendar-list,
 .calendar-list > row {
-  background-color: transparent;
+  background-color: @theme_bg_color;
+  color: @theme_fg_color;
 }
 
 .calendar-row {
@@ -215,4 +215,9 @@ window.dialog-window {
   font-weight: 700;
   font-size: 1.1em;
   padding: 10px 16px 0 16px;
+}
+
+paned > separator {
+  min-width: 1px;
+  background-color: @borders;
 }

@@ -355,7 +355,7 @@ pub fn open_calendar(app: &Rc<App>, uid: Option<&str>) {
         ));
         #[allow(deprecated)]
         b.style_context()
-            .add_provider(&provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION + 2);
+            .add_provider(&provider, gtk::STYLE_PROVIDER_PRIORITY_USER + 3);
         b.set_tooltip_text(Some(hex));
         let c = color.clone();
         b.connect_clicked(move |_| c.set_rgba(&widgets::parse_hex(hex)));

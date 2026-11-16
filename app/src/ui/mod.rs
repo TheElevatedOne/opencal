@@ -131,7 +131,7 @@ impl App {
             gtk::style_context_add_provider_for_display(
                 &display,
                 &colors_css,
-                gtk::STYLE_PROVIDER_PRIORITY_APPLICATION + 1,
+                gtk::STYLE_PROVIDER_PRIORITY_USER + 2,
             );
         }
 
@@ -187,6 +187,15 @@ impl App {
         app.watch_file();
         app.set_view(app.view.get());
         app.restart_sync_timer();
+        // The window owns the app: every signal handler only holds a Weak<App>, so without this
+        // strong reference the app would be freed as soon as the caller drops its Rc, and every
+        // button would silently stop working.
+        {
+            let keep = RefCell::new(Some(app.clone()));
+            app.window.connect_destroy(move |_| {
+                keep.borrow_mut().take();
+            });
+        }
         app.window.connect_close_request({
             let app = app.weak();
             move |w| {
@@ -336,7 +345,7 @@ impl App {
 
         // Sidebar
         self.sidebar.add_css_class("sidebar");
-        self.sidebar.set_width_request(240);
+        self.sidebar.set_width_request(200);
         // Set explicitly so expanding children (labels, lists) don't make the sidebar take half
         // the window.
         self.sidebar.set_hexpand(false);
@@ -410,10 +419,28 @@ impl App {
         *self.agenda.borrow_mut() = Some(agenda);
         *self.tasks.borrow_mut() = Some(tasks);
 
-        let body = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-        body.append(&self.sidebar);
-        body.append(&self.stack);
-        body.set_vexpand(true);
+        // Drag the divider to resize the sidebar.
+        let body = gtk::Paned::builder()
+            .orientation(gtk::Orientation::Horizontal)
+            .start_child(&self.sidebar)
+            .end_child(&self.stack)
+            .resize_start_child(false)
+            .shrink_start_child(false)
+            .shrink_end_child(false)
+            .position(self.config.borrow().view.sidebar_width.max(200))
+            .vexpand(true)
+            .build();
+        {
+            let app = self.weak();
+            body.connect_position_notify(move |p| {
+                if let Some(app) = app.upgrade()
+                    && app.sidebar.is_visible()
+                    && p.position() > 0
+                {
+                    app.config.borrow_mut().view.sidebar_width = p.position();
+                }
+            });
+        }
         self.content.append(&body);
         self.content.set_vexpand(true);
         root.append(&self.content);
@@ -460,14 +487,25 @@ impl App {
         );
         add("about", Box::new(|app| app.about()));
         add("shortcuts", Box::new(|app| app.shortcuts()));
-        add(
+        // Stateful, so the toolbar toggle button and F9 stay in step.
+        let sidebar = gio::SimpleAction::new_stateful(
             "toggle-sidebar",
-            Box::new(|app| {
-                let show = !app.sidebar.is_visible();
-                app.sidebar.set_visible(show);
-                app.config.borrow_mut().view.sidebar = show;
-            }),
+            None,
+            &self.config.borrow().view.sidebar.to_variant(),
         );
+        {
+            let app = self.weak();
+            sidebar.connect_activate(move |a, _| {
+                let show = !a.state().and_then(|s| s.get::<bool>()).unwrap_or(true);
+                a.set_state(&show.to_variant());
+                if let Some(app) = app.upgrade() {
+                    app.sidebar.set_visible(show);
+                    app.config.borrow_mut().view.sidebar = show;
+                    let _ = app.config.borrow().save(&app.paths);
+                }
+            });
+        }
+        win.add_action(&sidebar);
         for (i, v) in View::ALL.into_iter().enumerate() {
             add(
                 &format!("view-{}", v.name()),

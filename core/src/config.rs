@@ -65,6 +65,8 @@ pub struct ViewConfig {
     pub width: i32,
     pub height: i32,
     pub sidebar: bool,
+    /// Width of the sidebar in pixels.
+    pub sidebar_width: i32,
 }
 
 impl Default for ViewConfig {
@@ -78,6 +80,7 @@ impl Default for ViewConfig {
             width: 1100,
             height: 720,
             sidebar: true,
+            sidebar_width: 260,
         }
     }
 }

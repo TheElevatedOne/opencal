@@ -222,7 +222,9 @@ fn load_css() {
     gtk::style_context_add_provider_for_display(
         &display,
         &provider,
-        gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
+        // Above the user's gtk.css (pywal), which would otherwise restyle the coloured buttons;
+        // style.css only uses the theme's named colours, so the theme still applies.
+        gtk::STYLE_PROVIDER_PRIORITY_USER + 1,
     );
 }
 
@@ -313,7 +315,16 @@ fn self_test() -> glib::ExitCode {
         let profile = profile.clone();
         application.connect_activate(move |application| {
             load_css();
-            let app = ui::App::new(application, Paths::new(Some(&profile)));
+            // Like a real start: the caller keeps no reference, the window must keep the app.
+            let (weak, window) = {
+                let app = ui::App::new(application, Paths::new(Some(&profile)));
+                (Rc::downgrade(&app), app.window.clone())
+            };
+            let Some(app) = weak.upgrade() else {
+                eprintln!("self-test failed: the app was freed while its window is open");
+                application.quit();
+                return;
+            };
             app.load_demo();
             for v in ui::View::ALL {
                 app.set_view(v);
@@ -321,7 +332,52 @@ fn self_test() -> glib::ExitCode {
             let day = ui::today();
             app.go_to(day + CDuration::days(40));
             app.go_to(day);
-            ok.set(app.store.borrow().live_items().count() >= 10);
+            // Drive it through the window's actions, as the toolbar buttons do.
+            drop(app);
+            let mut passed = true;
+            for (action, expect) in [
+                ("win.view-week", ui::View::Week),
+                ("win.view-tasks", ui::View::Tasks),
+                ("win.view-month", ui::View::Month),
+            ] {
+                gtk::prelude::WidgetExt::activate_action(&window, action, None).ok();
+                let got = weak.upgrade().map(|a| a.view.get());
+                if got != Some(expect) {
+                    eprintln!("self-test failed: {action} gave {got:?}");
+                    passed = false;
+                }
+            }
+            if let Some(app) = weak.upgrade() {
+                let d = app.date.get();
+                let _ = gtk::prelude::WidgetExt::activate_action(&window, "win.next", None);
+                if app.date.get() == d {
+                    eprintln!("self-test failed: win.next did not move the date");
+                    passed = false;
+                }
+                passed &= app.store.borrow().live_items().count() >= 10;
+            }
+            // The dialogs and the sidebar toggle.
+            for action in [
+                "win.new-event",
+                "win.new-task",
+                "win.sync-settings",
+                "win.new-calendar",
+                "win.shortcuts",
+            ] {
+                let before = gtk::Window::list_toplevels().len();
+                let _ = gtk::prelude::WidgetExt::activate_action(&window, action, None);
+                if gtk::Window::list_toplevels().len() <= before {
+                    eprintln!("self-test failed: {action} opened no window");
+                    passed = false;
+                }
+            }
+            let sidebar_before = weak.upgrade().map(|a| a.config.borrow().view.sidebar);
+            let _ = gtk::prelude::WidgetExt::activate_action(&window, "win.toggle-sidebar", None);
+            if weak.upgrade().map(|a| a.config.borrow().view.sidebar) == sidebar_before {
+                eprintln!("self-test failed: win.toggle-sidebar did nothing");
+                passed = false;
+            }
+            ok.set(passed);
             for w in gtk::Window::list_toplevels() {
                 if let Ok(w) = w.downcast::<gtk::Window>() {
                     w.destroy();
