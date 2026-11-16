@@ -147,7 +147,11 @@ impl App {
             window,
             paths,
             date: Cell::new(today()),
-            view: Cell::new(View::from_name(&config.view.view).unwrap_or(View::Month)),
+            view: Cell::new(
+                View::from_name(&config.view.start_view)
+                    .or_else(|| View::from_name(&config.view.view))
+                    .unwrap_or(View::Month),
+            ),
             config: RefCell::new(config),
             store: RefCell::new(Store::new()),
             db: RefCell::new(db),
@@ -222,7 +226,11 @@ impl App {
                     c.view.view = app.view.get().name().to_string();
                     let _ = c.save(&app.paths);
                 }
-                if app.config.borrow().app.background && !app.quitting.get() {
+                // Hide only when there is a tray icon to bring the window back.
+                if app.config.borrow().app.background
+                    && app.tray.borrow().is_some()
+                    && !app.quitting.get()
+                {
                     // Keep running in the tray; opening opencal again shows the window.
                     w.set_visible(false);
                     return glib::Propagation::Stop;
@@ -397,12 +405,17 @@ impl App {
                 }
             });
         }
-        // Moving the month in the mini calendar doesn't select a day; mark its events anyway.
+        // The month/year arrows move the calendar's date without "day-selected": follow them
+        // in the main view too.
         for signal in ["next-month", "prev-month", "next-year", "prev-year"] {
             let app = self.weak();
-            self.mini.connect_local(signal, false, move |_| {
-                if let Some(app) = app.upgrade() {
-                    app.mark_mini();
+            self.mini.connect_local(signal, false, move |values| {
+                let cal = values[0].get::<gtk::Calendar>().ok()?;
+                let app = app.upgrade()?;
+                let d = widgets::from_glib_date(&cal.date());
+                if d != app.date.get() {
+                    app.date.set(d);
+                    app.refresh();
                 }
                 None
             });
@@ -585,12 +598,24 @@ impl App {
             Box::new(|app| settings::open_settings(app, None)),
         );
 
+        // Plain-key shortcuts run after the focused widget (bubble phase), unlike application
+        // accelerators (capture phase): typing "t" in the task entry must type a "t".
+        let keys = gtk::ShortcutController::new();
+        keys.set_propagation_phase(gtk::PropagationPhase::Bubble);
+        for key in ["t", "Home"] {
+            keys.add_shortcut(gtk::Shortcut::new(
+                gtk::ShortcutTrigger::parse_string(key),
+                Some(gtk::NamedAction::new("win.today")),
+            ));
+        }
+        win.add_controller(keys);
+
         self.add_param_actions(application);
 
         for (action, accels) in [
             ("win.new-event", &["<Control>n"][..]),
             ("win.new-task", &["<Control>t"]),
-            ("win.today", &["t", "Home"]),
+            ("win.today", &["<Control>Home"]),
             ("win.prev", &["Page_Up", "<Alt>Left"]),
             ("win.next", &["Page_Down", "<Alt>Right"]),
             ("win.sync", &["F5", "<Control>r"]),
@@ -924,7 +949,12 @@ impl App {
         let text = match std::fs::read_to_string(&db) {
             Ok(t) => t,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                *self.store.borrow_mut() = Store::new();
+                // A new calendar, or the file was removed while opencal runs: write what is in
+                // memory (empty for a new file) instead of losing it.
+                if self.last_written.borrow().is_empty() {
+                    *self.store.borrow_mut() = Store::new();
+                }
+                self.last_written.borrow_mut().clear();
                 self.save();
                 self.refresh_calendars();
                 self.queue_refresh();
@@ -949,8 +979,19 @@ impl App {
         };
         self.read_only.set(false);
         store.ensure_default_calendar();
-        *self.store.borrow_mut() = store;
+        let first_load = self.last_written.borrow().is_empty();
         *self.last_written.borrow_mut() = text;
+        if first_load {
+            *self.store.borrow_mut() = store;
+        } else {
+            // Another program (a sync, `opencal --sync`, the library) changed the file. Merge
+            // instead of replacing, so edits made here meanwhile (e.g. during a sync) survive;
+            // every entry carries its own change time, the newest wins.
+            let (mut merged, _) = opencal::merge::merge(&self.store.borrow(), &store);
+            merged.prune_tombstones(self.config.borrow().storage.tombstone_days);
+            *self.store.borrow_mut() = merged;
+            self.save();
+        }
         self.refresh_calendars();
         self.queue_refresh();
         Ok(())
@@ -1279,7 +1320,7 @@ impl App {
         let rows = [
             ("Ctrl+N", "New event"),
             ("Ctrl+T", "New task"),
-            ("T / Home", "Go to today"),
+            ("T / Home / Ctrl+Home", "Go to today"),
             ("Page Up / Alt+Left", "Previous day, week or month"),
             ("Page Down / Alt+Right", "Next day, week or month"),
             ("Ctrl+1 … Ctrl+5", "Day, Week, Month, Agenda, Tasks"),

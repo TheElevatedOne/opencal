@@ -1,6 +1,6 @@
 //! The event and task dialogs.
 
-use std::cell::RefCell;
+use std::cell::Cell;
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
@@ -230,26 +230,30 @@ pub fn open_event(
     end_box.append(&end_date.widget);
     end_box.append(&end_time.widget);
 
-    // Keep the length when the start moves.
+    // Keep the length when the start moves. The length is measured on the fields as shown
+    // (all-day ends are inclusive there), and the end fields are ignored while they are being
+    // moved along.
     {
-        let length = Rc::new(RefCell::new(end_dt - start.naive()));
-        let (sd, st, ed, et, ad) = (
+        let shown_len = |sd: &DatePicker, st: &TimePicker, ed: &DatePicker, et: &TimePicker| {
+            ed.get().and_time(et.get()) - sd.get().and_time(st.get())
+        };
+        let length = Rc::new(Cell::new(
+            shown_len(&start_date, &start_time, &end_date, &end_time).max(Duration::zero()),
+        ));
+        let moving = Rc::new(Cell::new(false));
+        let (sd, st, ed, et) = (
             start_date.clone(),
             start_time.clone(),
             end_date.clone(),
             end_time.clone(),
-            all_day.clone(),
         );
-        let len = length.clone();
+        let (len, mv) = (length.clone(), moving.clone());
         let update_end = Rc::new(move || {
-            let s = sd.get().and_time(st.get());
-            let e = s + *len.borrow();
-            ed.set(if ad.is_active() {
-                e.date().max(sd.get())
-            } else {
-                e.date()
-            });
+            let e = sd.get().and_time(st.get()) + len.get();
+            mv.set(true);
+            ed.set(e.date());
             et.set(e.time());
+            mv.set(false);
         });
         let u = update_end.clone();
         start_date.connect_changed(move |_| u());
@@ -262,9 +266,12 @@ pub fn open_event(
             end_time.clone(),
         );
         let remember = Rc::new(move || {
-            let l = ed.get().and_time(et.get()) - sd.get().and_time(st.get());
+            if moving.get() {
+                return;
+            }
+            let l = shown_len(&sd, &st, &ed, &et);
             if l >= Duration::zero() {
-                *length.borrow_mut() = l;
+                length.set(l);
             }
         });
         let r = remember.clone();

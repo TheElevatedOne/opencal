@@ -199,3 +199,68 @@ fn duration_parse() {
     );
     assert_eq!(ics::parse_duration("-PT15M"), Some(Duration::minutes(-15)));
 }
+
+/// Two profiles syncing through a folder with shell commands, like a user would set it up.
+#[test]
+fn sync_through_a_folder() {
+    use crate::{Config, Paths, sync};
+    let base = std::env::temp_dir().join(format!("opencal-sync-test-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    let remote = base.join("remote");
+    std::fs::create_dir_all(&remote).unwrap();
+    let setup = |name: &str| {
+        let paths = Paths::new(Some(&base.join(name)));
+        let mut config = Config::default();
+        let r = remote.display();
+        config.sync.pull = format!("[ ! -e {r}/c.ics ] || cp {r}/c.ics \"$CAL_DB_PULL\"");
+        config.sync.push = format!("cp \"$CAL_DB\" {r}/c.ics && cat \"$CAL_SYNC_REPORT\" > {r}/last-report");
+        (paths, config)
+    };
+    let (pa, ca) = setup("a");
+    let (pb, cb) = setup("b");
+
+    // A creates a task and syncs first: no remote yet, so it pushes.
+    let db_a = pa.db(&ca);
+    let mut a = sync::load_store(&db_a).unwrap();
+    let task = Item::new_task(DEFAULT_CALENDAR, "From A", None);
+    let uid = task.uid.clone();
+    a.add_item(task);
+    crate::save_store(&db_a, &a).unwrap();
+    let r = sync::sync(&pa, &ca);
+    assert!(r.ok(), "{:?}", r.error);
+    assert!(!r.remote_existed && r.pushed);
+
+    // B gets it.
+    let r = sync::sync(&pb, &cb);
+    assert!(r.ok(), "{:?}", r.error);
+    assert!(r.report.incoming.iter().any(|c| c.uid == uid));
+    let db_b = pb.db(&cb);
+    assert!(!sync::load_store(&db_b).unwrap().items[&uid].is_deleted());
+
+    // B deletes it; A learns about the deletion.
+    let mut b = sync::load_store(&db_b).unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    b.delete_item(&uid);
+    crate::save_store(&db_b, &b).unwrap();
+    assert!(sync::sync(&pb, &cb).ok());
+    assert!(std::fs::read_to_string(remote.join("last-report")).unwrap().contains("From A"));
+    let r = sync::sync(&pa, &ca);
+    assert!(r.ok());
+    assert!(sync::load_store(&db_a).unwrap().items[&uid].is_deleted());
+
+    // The remote copy vanishes (a broken script would look the same): no push over it.
+    std::fs::remove_file(remote.join("c.ics")).unwrap();
+    let r = sync::sync(&pa, &ca);
+    assert!(!r.ok() && !r.pushed, "must refuse to push");
+    assert!(!remote.join("c.ics").exists());
+
+    // A timed-out command is stopped, including what it started.
+    let mut slow = ca.clone();
+    slow.sync.pull = "sleep 30 & sleep 30".into();
+    slow.sync.timeout_seconds = 1;
+    let t = std::time::Instant::now();
+    let r = sync::sync(&pa, &slow);
+    assert!(!r.ok() && t.elapsed() < std::time::Duration::from_secs(10));
+
+    let _ = std::fs::remove_dir_all(&base);
+}

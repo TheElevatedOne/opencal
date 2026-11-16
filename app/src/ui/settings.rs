@@ -149,11 +149,13 @@ pub fn open_settings(app: &Rc<App>, start_page: Option<&str>) {
         autostart.connect_toggled(move |c| h.set_sensitive(c.is_active()));
     }
     section(&general, "Start-up");
-    let views: Vec<&str> = super::View::ALL.iter().map(|v| v.label()).collect();
+    let views: Vec<&str> = std::iter::once("The last one used")
+        .chain(super::View::ALL.iter().map(|v| v.label()))
+        .collect();
     let current = super::View::ALL
         .iter()
-        .position(|v| v.name() == cfg.view.view)
-        .unwrap_or(2);
+        .position(|v| v.name() == cfg.view.start_view)
+        .map_or(0, |i| i + 1);
     let start_view = dropdown_row(&general, "Open with the view", &views, current);
     stack.add_titled(&scrolled(&general), Some("general"), "General");
 
@@ -441,9 +443,10 @@ pub fn open_settings(app: &Rc<App>, start_page: Option<&str>) {
         move || {
             let mut c = app.config.borrow().clone();
             c.app.background = background.is_active();
-            c.view.view = super::View::ALL[start_view.selected() as usize % 5]
-                .name()
-                .to_string();
+            c.view.start_view = match start_view.selected() as usize {
+                0 => "last".to_string(),
+                i => super::View::ALL[(i - 1).min(4)].name().to_string(),
+            };
             c.view.week_starts_monday = monday.is_active();
             c.view.day_start_hour = day_start.value() as u32;
             c.view.show_completed = show_done.is_active();
@@ -518,6 +521,10 @@ pub fn open_settings(app: &Rc<App>, start_page: Option<&str>) {
                         &format!("{}: {e:#}", target.display()),
                     );
                 }
+            }
+            // Keep the menu's check item in step.
+            if let Some(a) = app.window.lookup_action("week-monday") {
+                a.change_state(&app.config.borrow().view.week_starts_monday.to_variant());
             }
             app.apply_background();
             app.restart_sync_timer();

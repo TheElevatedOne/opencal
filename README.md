@@ -92,7 +92,7 @@ the running window. `opencal --background` starts it in the tray (that is what t
 |---|---|
 | <kbd>Ctrl</kbd>+<kbd>N</kbd> | New event |
 | <kbd>Ctrl</kbd>+<kbd>T</kbd> | New task |
-| <kbd>T</kbd> or <kbd>Home</kbd> | Go to today |
+| <kbd>T</kbd>, <kbd>Home</kbd> (outside text fields) or <kbd>Ctrl</kbd>+<kbd>Home</kbd> | Go to today |
 | <kbd>Page Up</kbd> / <kbd>Page Down</kbd> | Previous / next day, week or month |
 | <kbd>Ctrl</kbd>+<kbd>1</kbd> … <kbd>Ctrl</kbd>+<kbd>5</kbd> | Day, Week, Month, Agenda, Tasks |
 | <kbd>F5</kbd> or <kbd>Ctrl</kbd>+<kbd>R</kbd> | Sync |
@@ -166,7 +166,10 @@ opencal has no sync server of its own. Sync works like KeePassXC's: you give it 
 3. The **push** command uploads `$CAL_DB`. It is skipped when the other copy already has everything.
 
 If the pull succeeds without creating `$CAL_DB_PULL`, opencal treats it as the first sync (there is no remote
-copy yet) and pushes. Set the commands in **Menu → Sync Settings…**, which also has ready-made examples. Commands
+copy yet) and pushes. So a pull script must fail (exit non-zero) when it can't reach the remote, and succeed
+without a file only when the remote file really doesn't exist; the example scripts do this. As a safety net,
+once a pull command has found a remote copy, opencal refuses to push when the same command later produces no
+file. To start over with an empty remote, delete `~/.local/share/opencal/sync-state`. Set the commands in **Menu → Sync Settings…**, which also has ready-made examples. Commands
 run with `sh -c` in the calendar file's folder, so they can be scripts. Sync runs on <kbd>F5</kbd> and,
 if you turn it on in **Settings → Sync**, when opencal starts, every N minutes and/or a few seconds after your
 last change (also while opencal is in the tray). From cron or a systemd timer, use `opencal --sync`. A running
@@ -191,7 +194,7 @@ the push command:
 
 | Script | Syncs through | Settings (environment variables) |
 |---|---|---|
-| `rclone.sh` | Any rclone remote (Drive, Dropbox, S3, SFTP, …) | `OPENCAL_RCLONE_REMOTE` (default `remote:opencal/calendar.ics`) |
+| `rclone.sh` | Any rclone remote (Drive, Dropbox, S3, SFTP, …) | `OPENCAL_RCLONE_DIR` (default `remote:opencal`) |
 | `git.sh` | A git repository; one commit per sync with the change list as message | `OPENCAL_GIT_REPO` (default `~/calendar-repo`) |
 | `scp.sh` | An ssh server | `OPENCAL_SSH_HOST`, `OPENCAL_SSH_FILE` |
 | `webdav.sh` | Nextcloud, ownCloud or any WebDAV folder (login from `~/.netrc`) | `OPENCAL_WEBDAV_URL` |
@@ -323,7 +326,8 @@ kept in `DIR` instead.
 | `sync.interval_minutes` | `0` (off) | Sync every N minutes while opencal runs |
 | `sync.after_change_seconds` | `0` (off) | Sync this many seconds after the last change |
 | `sync.timeout_seconds` | `300` | Kill a command that runs longer |
-| `view.view` | `month` | The view opencal opens with |
+| `view.start_view` | `last` | The view opencal opens with (`day`, `week`, `month`, `agenda`, `tasks` or `last`) |
+| `view.view` | `month` | The view used last |
 | `view.week_starts_monday` | `true` | First day of the week (also in the menu) |
 | `view.day_start_hour` | `7` | The hour the Day and Week views scroll to |
 | `view.show_completed` | `true` | Show completed tasks in the Tasks view |

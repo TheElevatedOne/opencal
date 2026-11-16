@@ -1,21 +1,25 @@
 #!/bin/sh
 # opencal sync with rclone (Google Drive, Dropbox, S3, WebDAV, SFTP, ... used as plain file storage).
-# Set up a remote first with `rclone config`, then in opencal's Sync Settings use this script as
+# Set up a remote first with `rclone config`, then in opencal's Settings → Sync use this script as
 # both the pull and the push command:
 #   /usr/share/doc/opencal/examples/sync/rclone.sh
 # $CAL_SYNC_STAGE says which stage is running.
-set -eu
-REMOTE=${OPENCAL_RCLONE_REMOTE:-remote:opencal/calendar.ics}
+set -u
+DIR=${OPENCAL_RCLONE_DIR:-remote:opencal}
+FILE=calendar.ics
 
 case "$CAL_SYNC_STAGE" in
 pull)
-    # No remote file yet (first sync): succeed without creating $CAL_DB_PULL.
-    if [ -z "$(rclone lsf "$REMOTE" 2>/dev/null)" ]; then
-        exit 0
-    fi
-    rclone copyto "$REMOTE" "$CAL_DB_PULL"
+    # Only "not found" means "no remote copy yet" (first sync). Any other error (no network,
+    # expired login) must fail, or opencal would push over the remote copy.
+    listing=$(rclone lsf "$DIR/")
+    rc=$?
+    [ "$rc" -eq 3 ] && exit 0          # directory not found
+    [ "$rc" -eq 0 ] || exit "$rc"
+    printf '%s\n' "$listing" | grep -qx "$FILE" || exit 0
+    rclone copyto "$DIR/$FILE" "$CAL_DB_PULL"
     ;;
 push)
-    rclone copyto "$CAL_DB" "$REMOTE"
+    rclone copyto "$CAL_DB" "$DIR/$FILE"
     ;;
 esac

@@ -248,7 +248,12 @@ fn run_gui(paths: Paths, separate: bool, background: bool) -> glib::ExitCode {
     // Only the first activation may start hidden; later ones (another `opencal`) show it.
     let first = Rc::new(Cell::new(true));
     application.connect_activate(move |application| {
-        if let Some(w) = application.windows().into_iter().next() {
+        // Already running: show the main window (not a dialog that happens to be first).
+        if let Some(w) = application
+            .windows()
+            .into_iter()
+            .find(|w| w.is::<gtk::ApplicationWindow>())
+        {
             w.set_visible(true);
             w.present();
             return;

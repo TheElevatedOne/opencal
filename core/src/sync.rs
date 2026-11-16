@@ -135,6 +135,8 @@ fn run_command(
         cmd.env(k, v);
     }
     cmd.env("CAL_SYNC_STAGE", stage);
+    // Its own process group, so a timeout can stop everything the command started.
+    std::os::unix::process::CommandExt::process_group(&mut cmd, 0);
     let mut child = cmd
         .spawn()
         .with_context(|| format!("starting the {stage} command"))?;
@@ -157,6 +159,13 @@ fn run_command(
             break Some(status);
         }
         if started.elapsed() > timeout {
+            // Kill the whole process group: programs the script started (ssh, rclone, …) would
+            // otherwise keep the output pipes open and the reads below would never finish.
+            let _ = Command::new("kill")
+                .args(["-KILL", "--", &format!("-{}", child.id())])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status();
             let _ = child.kill();
             let _ = child.wait();
             break None;
@@ -256,6 +265,24 @@ fn sync_inner(paths: &Paths, config: &Config, result: &mut SyncResult) -> Result
         }
         _ => crate::Store::default(),
     };
+    // Safety net: once this pull command has found a remote copy, a pull that "succeeds"
+    // without a file is far more likely a broken script or connection than a deleted remote.
+    // Pushing now would replace the remote copy and lose the other devices' changes.
+    let state_file = paths.data_dir.join("sync-state");
+    let known_remote = std::fs::read_to_string(&state_file)
+        .ok()
+        .is_some_and(|s| s == sc.pull);
+    if !sc.pull.trim().is_empty() && !result.remote_existed && known_remote {
+        bail!(
+            "the pull command produced no file, but earlier syncs with it found one; not pushing, \
+             so the remote copy isn't overwritten. If the remote copy is really gone, delete {} \
+             and sync again",
+            state_file.display()
+        );
+    }
+    if result.remote_existed && !known_remote {
+        let _ = crate::write_atomic(&state_file, sc.pull.as_bytes());
+    }
 
     // Re-read the local file: it may have been edited while the pull ran.
     let local = load_store(&db).unwrap_or(local);
@@ -320,13 +347,15 @@ pub fn merge_file(db: &Path, other: &Path) -> Result<Report> {
 pub const PRESETS: &[(&str, &str, &str)] = &[
     (
         "rclone (any cloud storage rclone supports)",
-        r#"rclone copyto remote:opencal/calendar.ics "$CAL_DB_PULL" || [ "$(rclone lsf remote:opencal/calendar.ics 2>/dev/null)" = "" ]"#,
+        // Only "not found" means "no remote copy yet"; any other failure stops the sync.
+        r#"out=$(rclone lsf remote:opencal/); rc=$?; [ $rc -eq 3 ] && exit 0; [ $rc -eq 0 ] || exit $rc; printf '%s\n' "$out" | grep -qx calendar.ics || exit 0; rclone copyto remote:opencal/calendar.ics "$CAL_DB_PULL""#,
         r#"rclone copyto "$CAL_DB" remote:opencal/calendar.ics"#,
     ),
     (
         "scp / ssh server",
-        r#"scp -q user@host:opencal/calendar.ics "$CAL_DB_PULL" || ! ssh user@host test -e opencal/calendar.ics"#,
-        r#"scp -q "$CAL_DB" user@host:opencal/calendar.ics"#,
+        // `test -e` exits 1 for a missing file and 255 when ssh fails.
+        r#"ssh user@host test -e opencal/calendar.ics; rc=$?; [ $rc -eq 1 ] && exit 0; [ $rc -eq 0 ] || exit $rc; scp -q user@host:opencal/calendar.ics "$CAL_DB_PULL""#,
+        r#"ssh user@host mkdir -p opencal && scp -q "$CAL_DB" user@host:opencal/calendar.ics.tmp && ssh user@host mv opencal/calendar.ics.tmp opencal/calendar.ics"#,
     ),
     (
         "WebDAV with curl (Nextcloud, …)",

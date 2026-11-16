@@ -88,7 +88,7 @@ impl Default for SyncConfig {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ViewConfig {
-    /// day, week, month, agenda or tasks
+    /// The view used last: day, week, month, agenda or tasks.
     pub view: String,
     pub week_starts_monday: bool,
     /// The hour the day and week views scroll to.
@@ -99,6 +99,8 @@ pub struct ViewConfig {
     pub width: i32,
     pub height: i32,
     pub sidebar: bool,
+    /// The view opencal opens with: day, week, month, agenda, tasks, or "last" (`view`).
+    pub start_view: String,
     /// Length of new events, in minutes.
     pub event_minutes: u32,
     /// UID of the calendar new events and tasks go to (empty = the first visible one).
@@ -118,6 +120,7 @@ impl Default for ViewConfig {
             width: 1100,
             height: 720,
             sidebar: true,
+            start_view: "last".into(),
             event_minutes: 60,
             default_calendar: String::new(),
             sidebar_width: 260,

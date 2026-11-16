@@ -90,21 +90,26 @@ impl DatePicker {
             handlers: Rc::new(RefCell::new(Vec::new())),
         };
         picker.set(date);
+        // GtkCalendar emits day-selected only when a day is picked (or set from code, which
+        // `set` does with the same date); the month/year arrows move its date silently.
         let p = picker.clone();
+        let pop = popover.clone();
         picker.calendar.connect_day_selected(move |cal| {
             let d = from_glib_date(&cal.date());
-            let old = p.date.get();
-            if d != old {
-                p.date.set(d);
-                p.widget.set_label(&format_date_long(d));
-                for h in p.handlers.borrow().iter() {
-                    h(d);
-                }
-                // Changing the month with the arrows also selects a day; stay open for that.
-                if (d.year(), d.month()) == (old.year(), old.month()) {
-                    popover.popdown();
-                }
+            if d == p.date.get() {
+                return;
             }
+            p.date.set(d);
+            p.widget.set_label(&format_date_long(d));
+            for h in p.handlers.borrow().iter() {
+                h(d);
+            }
+            pop.popdown();
+        });
+        // Arrows used without picking a day: open on the chosen date next time.
+        let p = picker.clone();
+        popover.connect_show(move |_| {
+            p.calendar.select_day(&glib_date(p.date.get()));
         });
         picker
     }
