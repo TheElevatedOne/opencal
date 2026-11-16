@@ -23,6 +23,6 @@ pkgbase = opencal-bin
 	options = !debug
 	options = !strip
 	source = opencal-0.1.0-linux-x86_64.tar.gz::https://github.com/TheElevatedOne/opencal/releases/download/0.1.0/opencal-0.1.0-linux-x86_64.tar.gz
-	sha256sums = SKIP
+	sha256sums = f322015c979a1bf313a4f0d2720e995a0e457280f1e6b4adf502b705a8c69cf2
 
 pkgname = opencal-bin

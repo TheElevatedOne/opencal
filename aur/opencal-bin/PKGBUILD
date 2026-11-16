@@ -29,7 +29,7 @@ conflicts=("$_pkgname")
 # Built and stripped on Arch Linux by the upstream release workflow. Tags have no "v".
 options=('!debug' '!strip')
 source=("$_pkgname-$pkgver-linux-x86_64.tar.gz::$url/releases/download/$pkgver/$_pkgname-$pkgver-linux-x86_64.tar.gz")
-sha256sums=('SKIP')
+sha256sums=('f322015c979a1bf313a4f0d2720e995a0e457280f1e6b4adf502b705a8c69cf2')
 
 package() {
   cd "$_pkgname-$pkgver-linux-$CARCH"
