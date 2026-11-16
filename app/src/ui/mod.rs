@@ -4,6 +4,7 @@
 pub mod agenda;
 pub mod editor;
 pub mod month;
+pub mod reminders;
 pub mod settings;
 pub mod tasks;
 pub mod timegrid;
@@ -105,6 +106,13 @@ pub struct App {
     sync_timer: RefCell<Option<glib::SourceId>>,
     pub open_editors: RefCell<HashMap<String, gtk::Window>>,
     me: RefCell<Weak<App>>,
+    /// Keeps the application running while the window is hidden (background mode).
+    hold: RefCell<Option<gio::ApplicationHoldGuard>>,
+    tray: RefCell<Option<crate::tray::TrayHandle>>,
+    /// Set by Quit, so closing the window really exits even in background mode.
+    quitting: Cell<bool>,
+    change_sync: RefCell<Option<glib::SourceId>>,
+    reminder_state: RefCell<(Option<NaiveDateTime>, HashSet<String>)>,
 }
 
 impl App {
@@ -168,6 +176,11 @@ impl App {
             sync_timer: RefCell::new(None),
             open_editors: RefCell::new(HashMap::new()),
             me: RefCell::new(Weak::new()),
+            hold: RefCell::new(None),
+            tray: RefCell::new(None),
+            quitting: Cell::new(false),
+            change_sync: RefCell::new(None),
+            reminder_state: RefCell::new((None, HashSet::new())),
         });
         *app.me.borrow_mut() = Rc::downgrade(&app);
         app.build_ui();
@@ -199,16 +212,37 @@ impl App {
         app.window.connect_close_request({
             let app = app.weak();
             move |w| {
-                if let Some(app) = app.upgrade() {
+                let Some(app) = app.upgrade() else {
+                    return glib::Propagation::Proceed;
+                };
+                {
                     let mut c = app.config.borrow_mut();
                     c.view.width = w.default_width();
                     c.view.height = w.default_height();
                     c.view.view = app.view.get().name().to_string();
                     let _ = c.save(&app.paths);
                 }
+                if app.config.borrow().app.background && !app.quitting.get() {
+                    // Keep running in the tray; opening opencal again shows the window.
+                    w.set_visible(false);
+                    return glib::Propagation::Stop;
+                }
+                app.shutdown();
                 glib::Propagation::Proceed
             }
         });
+        // Reminders and the tray tooltip.
+        {
+            let weak = app.weak();
+            glib::timeout_add_seconds_local(30, move || match weak.upgrade() {
+                Some(app) => {
+                    app.check_reminders();
+                    glib::ControlFlow::Continue
+                }
+                None => glib::ControlFlow::Break,
+            });
+        }
+        app.check_reminders();
         app
     }
 
@@ -316,6 +350,7 @@ impl App {
         let sync_section = gio::Menu::new();
         sync_section.append(Some("Sync Now"), Some("win.sync"));
         sync_section.append(Some("Sync Settings…"), Some("win.sync-settings"));
+        sync_section.append(Some("Settings…"), Some("win.settings"));
         menu.append_section(None, &sync_section);
         let cal_section = gio::Menu::new();
         cal_section.append(Some("New Calendar…"), Some("win.new-calendar"));
@@ -540,11 +575,17 @@ impl App {
             let app = self.weak();
             quit.connect_activate(move |_, _| {
                 if let Some(app) = app.upgrade() {
-                    app.window.close();
+                    app.quit();
                 }
             });
         }
         application.add_action(&quit);
+        add(
+            "settings",
+            Box::new(|app| settings::open_settings(app, None)),
+        );
+
+        self.add_param_actions(application);
 
         for (action, accels) in [
             ("win.new-event", &["<Control>n"][..]),
@@ -557,6 +598,7 @@ impl App {
             ("win.export", &["<Control>e"]),
             ("win.toggle-sidebar", &["F9"]),
             ("win.shortcuts", &["<Control>question"]),
+            ("win.settings", &["<Control>comma"]),
             ("app.quit", &["<Control>q"]),
         ] {
             application.set_accels_for_action(action, accels);
@@ -794,9 +836,18 @@ impl App {
         }
     }
 
-    /// The calendar new entries go to: the first visible one.
+    /// The calendar new entries go to: the one chosen in the settings, else the first visible
+    /// one.
     pub fn default_calendar(&self) -> String {
         let store = self.store.borrow();
+        let chosen = self.config.borrow().view.default_calendar.clone();
+        if store
+            .calendars
+            .get(&chosen)
+            .is_some_and(|c| !c.is_deleted())
+        {
+            return chosen;
+        }
         let hidden = self.hidden_calendars();
         let cals = store.live_calendars();
         cals.iter()
@@ -817,6 +868,26 @@ impl App {
         self.save();
         self.refresh_calendars();
         self.queue_refresh();
+        self.schedule_change_sync();
+    }
+
+    /// "Sync after changes": sync a while after the last edit, so a burst of edits is one sync.
+    fn schedule_change_sync(&self) {
+        let secs = self.config.borrow().sync.after_change_seconds;
+        if let Some(id) = self.change_sync.borrow_mut().take() {
+            id.remove();
+        }
+        if secs == 0 || !self.sync_configured() {
+            return;
+        }
+        let app = self.weak();
+        let id = glib::timeout_add_seconds_local_once(secs, move || {
+            if let Some(app) = app.upgrade() {
+                app.change_sync.borrow_mut().take();
+                app.sync_now(false);
+            }
+        });
+        *self.change_sync.borrow_mut() = Some(id);
     }
 
     pub fn save(&self) {
@@ -949,7 +1020,7 @@ impl App {
                 9
             };
             let s = d.and_time(NaiveTime::from_hms_opt(hour, 0, 0).unwrap());
-            (When::DateTime(s), When::DateTime(s + CDuration::hours(1)))
+            (When::DateTime(s), When::DateTime(s + self.event_length()))
         });
         let item = Item::new_event(&self.default_calendar(), "", start, end);
         editor::open_event(&self.rc(), None, Some(item), None);
@@ -1230,11 +1301,276 @@ impl App {
         w.present();
     }
 
-    pub fn present(&self) {
-        self.window.present();
+    /// Start-up: show the window (or stay in the tray), and sync if set to sync at start.
+    pub fn start(&self, show: bool) {
+        self.apply_background();
+        if show || self.tray.borrow().is_none() {
+            self.window.present();
+        }
         if self.config.borrow().sync.on_start && self.sync_configured() {
             self.sync_now(false);
         }
+    }
+
+    /// Show the window (from the tray, a notification or a second launch).
+    pub fn show_window(&self) {
+        self.window.set_visible(true);
+        self.window.present();
+    }
+
+    /// Default length of a new event.
+    pub fn event_length(&self) -> CDuration {
+        CDuration::minutes(self.config.borrow().view.event_minutes.clamp(5, 24 * 60) as i64)
+    }
+
+    /// Start or stop background mode (tray icon + keeping the app alive) to match the settings.
+    pub fn apply_background(&self) {
+        let want = self.config.borrow().app.background;
+        if want && self.tray.borrow().is_none() {
+            let app = self.weak();
+            match crate::tray::spawn(move |action| {
+                if let Some(app) = app.upgrade() {
+                    app.tray_action(action);
+                }
+            }) {
+                Ok(handle) => {
+                    handle.set_tooltip(reminders::next_up(self));
+                    *self.tray.borrow_mut() = Some(handle);
+                }
+                Err(e) => self.set_status(&format!("No tray icon (is a tray running?): {e}")),
+            }
+            if let Some(application) = self.window.application() {
+                *self.hold.borrow_mut() = Some(application.hold());
+            }
+        } else if !want {
+            if let Some(t) = self.tray.borrow_mut().take() {
+                t.shutdown();
+            }
+            self.hold.borrow_mut().take();
+        }
+    }
+
+    fn tray_action(&self, action: crate::tray::TrayAction) {
+        use crate::tray::TrayAction;
+        match action {
+            TrayAction::Toggle if self.window.is_visible() => {
+                self.window.set_visible(false);
+            }
+            TrayAction::Toggle | TrayAction::Show => self.show_window(),
+            TrayAction::NewEvent => {
+                self.show_window();
+                self.new_event_at(None);
+            }
+            TrayAction::NewTask => {
+                self.show_window();
+                editor::open_task(&self.rc(), None, None);
+            }
+            TrayAction::Sync => self.sync_now(false),
+            TrayAction::Quit => self.quit(),
+        }
+    }
+
+    /// Really exit (also in background mode).
+    pub fn quit(&self) {
+        self.quitting.set(true);
+        self.window.close();
+        if let Some(application) = self.window.application() {
+            self.shutdown();
+            application.quit();
+        }
+    }
+
+    fn shutdown(&self) {
+        if let Some(t) = self.tray.borrow_mut().take() {
+            t.shutdown();
+        }
+        self.hold.borrow_mut().take();
+    }
+
+    fn check_reminders(&self) {
+        {
+            let mut state = self.reminder_state.borrow_mut();
+            let (last, sent) = &mut *state;
+            reminders::tick(self, last, sent);
+        }
+        if let Some(t) = self.tray.borrow().as_ref() {
+            t.set_tooltip(reminders::next_up(self));
+        }
+    }
+
+    /// Point opencal at another calendar file (Settings → Storage).
+    pub fn set_db_path(&self, path: PathBuf) -> anyhow::Result<()> {
+        self.save();
+        *self.db.borrow_mut() = path;
+        self.last_written.borrow_mut().clear();
+        self.read_only.set(false);
+        self.load_from_disk()?;
+        self.monitor.borrow_mut().take();
+        self.watch_file();
+        Ok(())
+    }
+
+    /// Right-click menu for a day (`time` set in the day/week hour grid).
+    pub fn day_menu(&self, day: NaiveDate, time: Option<NaiveDateTime>) -> gio::Menu {
+        let menu = gio::Menu::new();
+        let d = day.format("%Y-%m-%d").to_string();
+        let new = gio::Menu::new();
+        let item = |label: &str, action: &str, target: &str| {
+            let i = gio::MenuItem::new(Some(label), None);
+            i.set_action_and_target_value(Some(action), Some(&target.to_variant()));
+            i
+        };
+        match time {
+            Some(t) => new.append_item(&item(
+                &format!("New Event at {}", t.format("%H:%M")),
+                "win.new-event-at",
+                &t.format("%Y-%m-%dT%H:%M").to_string(),
+            )),
+            None => new.append_item(&item("New Event…", "win.new-event-on", &d)),
+        }
+        new.append_item(&item("New All-Day Event…", "win.new-allday-on", &d));
+        new.append_item(&item("New Task Due This Day…", "win.new-task-on", &d));
+        menu.append_section(None, &new);
+        if self.view.get() != View::Day {
+            let nav = gio::Menu::new();
+            nav.append_item(&item(
+                &format!("Open {}", day.format("%A %-d %B")),
+                "win.open-day",
+                &d,
+            ));
+            menu.append_section(None, &nav);
+        }
+        menu
+    }
+
+    /// Right-click menu for an event or task.
+    pub fn item_menu(&self, uid: &str, occurrence: Option<NaiveDateTime>) -> gio::Menu {
+        let menu = gio::Menu::new();
+        let target = match occurrence {
+            Some(o) => format!("{uid}\n{}", o.format("%Y-%m-%dT%H:%M")),
+            None => uid.to_string(),
+        };
+        let item = |label: &str, action: &str| {
+            let i = gio::MenuItem::new(Some(label), None);
+            i.set_action_and_target_value(Some(action), Some(&target.to_variant()));
+            i
+        };
+        let main = gio::Menu::new();
+        main.append_item(&item("Edit…", "win.edit-item"));
+        let store = self.store.borrow();
+        if let Some(i) = store.items.get(uid)
+            && i.kind == Kind::Task
+        {
+            main.append_item(&item(
+                if i.is_completed() {
+                    "Mark as Not Done"
+                } else {
+                    "Mark as Done"
+                },
+                "win.toggle-done",
+            ));
+        }
+        main.append_item(&item("Duplicate", "win.duplicate-item"));
+        menu.append_section(None, &main);
+        let danger = gio::Menu::new();
+        danger.append_item(&item("Delete…", "win.delete-item"));
+        menu.append_section(None, &danger);
+        menu
+    }
+
+    fn add_param_actions(&self, application: &gtk::Application) {
+        let add = |group: &gio::ActionMap, name: &str, f: fn(&App, &str)| {
+            let action = gio::SimpleAction::new(name, Some(glib::VariantTy::STRING));
+            let app = self.weak();
+            action.connect_activate(move |_, v| {
+                if let (Some(app), Some(s)) = (app.upgrade(), v.and_then(|v| v.get::<String>())) {
+                    f(&app, &s);
+                }
+            });
+            group.add_action(&action);
+        };
+        let win = self.window.upcast_ref::<gio::ActionMap>();
+        add(win, "new-event-on", |app, s| {
+            if let Ok(d) = NaiveDate::parse_from_str(s, "%Y-%m-%d") {
+                let start = d.and_time(NaiveTime::from_hms_opt(9, 0, 0).unwrap());
+                app.new_event_at(Some((
+                    When::DateTime(start),
+                    When::DateTime(start + app.event_length()),
+                )));
+            }
+        });
+        add(win, "new-event-at", |app, s| {
+            if let Ok(t) = NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M") {
+                app.new_event_at(Some((
+                    When::DateTime(t),
+                    When::DateTime(t + app.event_length()),
+                )));
+            }
+        });
+        add(win, "new-allday-on", |app, s| {
+            if let Ok(d) = NaiveDate::parse_from_str(s, "%Y-%m-%d") {
+                app.new_event_at(Some((When::Date(d), When::Date(d + CDuration::days(1)))));
+            }
+        });
+        add(win, "new-task-on", |app, s| {
+            if let Ok(d) = NaiveDate::parse_from_str(s, "%Y-%m-%d") {
+                let item = Item::new_task(&app.default_calendar(), "", Some(When::Date(d)));
+                editor::open_task(&app.rc(), None, Some(item));
+            }
+        });
+        add(win, "open-day", |app, s| {
+            if let Ok(d) = NaiveDate::parse_from_str(s, "%Y-%m-%d") {
+                app.show_day(d);
+            }
+        });
+        add(win, "edit-item", |app, s| {
+            let (uid, occ) = split_target(s);
+            app.open_item(&uid, occ);
+        });
+        add(win, "toggle-done", |app, s| {
+            let (uid, _) = split_target(s);
+            let done = app
+                .store
+                .borrow()
+                .items
+                .get(&uid)
+                .is_some_and(|i| i.is_completed());
+            app.set_task_done(&uid, !done);
+        });
+        add(win, "duplicate-item", |app, s| {
+            let (uid, _) = split_target(s);
+            let Some(orig) = app.store.borrow().items.get(&uid).cloned() else {
+                return;
+            };
+            let mut copy = match orig.kind {
+                Kind::Event => Item::new_event(
+                    &orig.calendar,
+                    &orig.summary,
+                    orig.start.unwrap(),
+                    orig.end.unwrap_or(orig.start.unwrap()),
+                ),
+                Kind::Task => Item::new_task(&orig.calendar, &orig.summary, orig.due),
+            };
+            copy.description = orig.description.clone();
+            copy.location = orig.location.clone();
+            copy.rrule = orig.rrule.clone();
+            copy.priority = orig.priority;
+            match copy.kind {
+                Kind::Event => editor::open_event(&app.rc(), None, Some(copy), None),
+                Kind::Task => editor::open_task(&app.rc(), None, Some(copy)),
+            }
+        });
+        add(win, "delete-item", |app, s| {
+            let (uid, occ) = split_target(s);
+            editor::confirm_delete(&app.rc(), &uid, occ, app.window.upcast_ref(), None);
+        });
+        // Notifications use app-level actions: they arrive with no window focused.
+        let appmap = application.upcast_ref::<gio::ActionMap>();
+        add(appmap, "open-item", |app, uid| {
+            app.show_window();
+            app.open_item(uid, None);
+        });
+        add(appmap, "task-done", |app, uid| app.set_task_done(uid, true));
     }
 
     pub fn db_path(&self) -> PathBuf {
@@ -1309,4 +1645,29 @@ impl App {
             s.add_item(Item::new_task("demo-family", "Book the cabin", None));
         });
     }
+}
+
+/// "uid" or "uid\nYYYY-MM-DDTHH:MM" (an item menu target with the clicked occurrence).
+fn split_target(s: &str) -> (String, Option<NaiveDateTime>) {
+    match s.split_once('\n') {
+        Some((uid, t)) => (
+            uid.to_string(),
+            NaiveDateTime::parse_from_str(t, "%Y-%m-%dT%H:%M").ok(),
+        ),
+        None => (s.to_string(), None),
+    }
+}
+
+/// Show a menu at a point of `parent` (right click). The popover removes itself when closed.
+pub fn popup_menu(parent: &impl IsA<gtk::Widget>, menu: &gio::Menu, x: f64, y: f64) {
+    let pop = gtk::PopoverMenu::from_model(Some(menu));
+    pop.set_parent(parent);
+    pop.set_has_arrow(false);
+    pop.set_halign(gtk::Align::Start);
+    pop.set_pointing_to(Some(&gdk::Rectangle::new(x as i32, y as i32, 1, 1)));
+    pop.connect_closed(|p| {
+        let p = p.clone();
+        glib::idle_add_local_once(move || p.unparent());
+    });
+    pop.popup();
 }

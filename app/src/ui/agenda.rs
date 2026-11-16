@@ -32,6 +32,18 @@ impl AgendaView {
                 app.open_item(&uid, Some(start));
             }
         });
+        let menu_click = gtk::GestureClick::builder().button(3).build();
+        let (r, a, l) = (rows.clone(), app.weak(), list.clone());
+        menu_click.connect_pressed(move |_, _, x, y| {
+            let Some(row) = l.row_at_y(y as i32) else {
+                return;
+            };
+            let entry = r.borrow().get(row.index() as usize).cloned().flatten();
+            if let (Some((uid, start)), Some(app)) = (entry, a.upgrade()) {
+                super::popup_menu(&l, &app.item_menu(&uid, Some(start)), x, y);
+            }
+        });
+        list.add_controller(menu_click);
         let page = gtk::Box::new(gtk::Orientation::Vertical, 0);
         page.add_css_class("page");
         page.append(&list);

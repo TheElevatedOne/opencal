@@ -43,6 +43,13 @@ KeePassXC syncs its database, and merges the two copies.
 - **Tasks**: due date (with or without a time), priority, notes, completion. A quick-add field in the Tasks view.
 - **Drag and drop** in the Day and Week views: drag on empty space to create an event, drag an event to move it,
   drag its bottom edge to resize it (15-minute steps).
+- **Right-click menus**: on a day (New Event, New All-Day Event, New Task, Open Day), on an hour of the Day and Week
+  views (New Event at that time) and on events and tasks (Edit, Mark as Done, Duplicate, Delete).
+- **Runs in the background** if you want: a tray icon (StatusNotifierItem, e.g. Waybar's tray) keeps opencal
+  running with the window closed, it can start at login, and running `opencal` again shows the running window.
+- **Reminders**: desktop notifications before events (default 10 minutes) and when tasks are due, with a
+  **Mark Done** button.
+- **Automatic sync** when opencal starts, every N minutes, and/or shortly after each change.
 - **Plain file storage**: one `.ics` file that other calendar programs can import. Deletions and completions are
   recorded in it, so two copies merge without a server.
 - **Sync with any command**: rclone, scp, git, curl/WebDAV, a shared folder or your own script. The result
@@ -78,7 +85,8 @@ See [Building](#building).
 
 ## Usage
 
-Start `opencal` from your launcher or a terminal.
+Start `opencal` from your launcher or a terminal. Only one opencal runs at a time: starting it again shows
+the running window. `opencal --background` starts it in the tray (that is what the login entry uses).
 
 | Key | Action |
 |---|---|
@@ -90,7 +98,10 @@ Start `opencal` from your launcher or a terminal.
 | <kbd>F5</kbd> or <kbd>Ctrl</kbd>+<kbd>R</kbd> | Sync |
 | <kbd>Ctrl</kbd>+<kbd>I</kbd> / <kbd>Ctrl</kbd>+<kbd>E</kbd> | Import / export iCalendar |
 | <kbd>F9</kbd> | Show or hide the sidebar |
+| <kbd>Ctrl</kbd>+<kbd>,</kbd> | Settings |
+| <kbd>Ctrl</kbd>+<kbd>Q</kbd> | Quit (also when running in the tray) |
 | Double-click | New event on that day or at that time |
+| Right-click | New event/task menu on a day or hour; Edit/Done/Duplicate/Delete on an entry |
 
 The command line works without opening a window:
 
@@ -117,9 +128,11 @@ opencal - local calendar and task manager
 
 Usage: opencal [--profile DIR] [COMMAND]
 
-Without a command, opens the calendar window.
+Without a command, opens the calendar window. If opencal is already running (also in the
+tray), its window is shown instead.
 
 Commands:
+  --background           Start in the tray without opening the window (used at login)
   --sync                 Run the configured sync (pull, merge, push) and print the changes
   --merge FILE           Merge another opencal calendar file into yours
   --import FILE          Import an .ics file (into a new calendar named after the file)
@@ -154,9 +167,10 @@ opencal has no sync server of its own. Sync works like KeePassXC's: you give it 
 
 If the pull succeeds without creating `$CAL_DB_PULL`, opencal treats it as the first sync (there is no remote
 copy yet) and pushes. Set the commands in **Menu → Sync Settings…**, which also has ready-made examples. Commands
-run with `sh -c` in the calendar file's folder, so they can be scripts. Sync runs on <kbd>F5</kbd>, when opencal
-starts, every N minutes, or with `opencal --sync`. A running opencal reloads the file when another program
-changes it.
+run with `sh -c` in the calendar file's folder, so they can be scripts. Sync runs on <kbd>F5</kbd> and,
+if you turn it on in **Settings → Sync**, when opencal starts, every N minutes and/or a few seconds after your
+last change (also while opencal is in the tray). From cron or a systemd timer, use `opencal --sync`. A running
+opencal reloads the file when another program changes it.
 
 | Variable | Value |
 |---|---|
@@ -280,25 +294,43 @@ opencal::save_store(&db, &store)?;
 
 ## Configuration
 
-Settings are in `~/.config/opencal/config.toml`. opencal writes the file when you change a setting in the window;
-you can also edit it by hand. With `--profile DIR` (or `OPENCAL_PROFILE=DIR`) the settings and the calendar are
+Open **Menu → Settings…** (<kbd>Ctrl</kbd>+<kbd>,</kbd>). It has five pages:
+
+| Page | Settings |
+|---|---|
+| General | Keep running in the tray when the window is closed; start at login (optionally in the tray); the view opencal opens with |
+| Calendar | First day of the week; the hour the Day and Week views scroll to; showing completed tasks; length of new events; the calendar new entries go to |
+| Reminders | Notify before events (and how long before); notify when tasks are due |
+| Sync | Sync at start, every N minutes, after changes; pull and push commands with examples; command timeout |
+| Storage | Location of the calendar file; how long deleted entries are remembered |
+
+Settings are stored in `~/.config/opencal/config.toml`. opencal writes the file when you change a setting;
+you can also edit it by hand. "Start at login" is the file `~/.config/autostart/org.opencal.OpenCal.desktop`. With `--profile DIR` (or `OPENCAL_PROFILE=DIR`) the settings and the calendar are
 kept in `DIR` instead.
 
 | Key | Default | Description |
 |---|---|---|
+| `app.background` | `false` | Keep running in the tray when the window is closed |
+| `reminders.events` | `true` | Notify before events |
+| `reminders.minutes_before` | `10` | How many minutes before |
+| `reminders.tasks` | `true` | Notify when tasks are due (date-only tasks at `view.day_start_hour`) |
 | `storage.path` | empty = `~/.local/share/opencal/calendar.ics` | The calendar file |
 | `storage.tombstone_days` | `0` (keep) | Forget deleted entries after this many days. A copy not synced for longer may bring them back |
 | `sync.pull` | empty | Pull command (empty = merge and push only) |
 | `sync.push` | empty | Push command (empty = pull and merge only) |
 | `sync.always_push` | `false` | Push even when the remote copy already has everything |
 | `sync.on_start` | `false` | Sync when the window opens |
-| `sync.interval_minutes` | `0` (off) | Sync every N minutes while the window is open |
+| `sync.interval_minutes` | `0` (off) | Sync every N minutes while opencal runs |
+| `sync.after_change_seconds` | `0` (off) | Sync this many seconds after the last change |
 | `sync.timeout_seconds` | `300` | Kill a command that runs longer |
 | `view.view` | `month` | The view opencal opens with |
 | `view.week_starts_monday` | `true` | First day of the week (also in the menu) |
 | `view.day_start_hour` | `7` | The hour the Day and Week views scroll to |
 | `view.show_completed` | `true` | Show completed tasks in the Tasks view |
 | `view.hidden_calendars` | `[]` | UIDs of calendars that are switched off |
+| `view.event_minutes` | `60` | Length of a new event |
+| `view.default_calendar` | empty (first visible) | UID of the calendar new entries go to |
+| `view.sidebar_width` | `260` | Width of the sidebar (drag the divider) |
 
 ## Building
 
@@ -324,7 +356,11 @@ GDK_BACKEND=broadway BROADWAY_DISPLAY=:5 ./target/release/opencal --screenshot m
 
 - Changes to a single occurrence of a repeating event (`RECURRENCE-ID`) are not supported. Imported overrides are
   skipped and the series is kept. Deleting one occurrence works.
-- There are no reminder notifications yet. Alarms in imported files are kept in the file.
+- Reminders come from opencal itself, so they only appear while it runs (turn on the tray to keep it running).
+  `VALARM` alarms in imported files are kept in the file but don't trigger notifications.
+- If your session's accessibility service (AT-SPI) is broken, GTK prints "Unable to register the application"
+  for every window; opencal detects this at start and turns GTK's accessibility off for itself. Restarting the
+  accessibility bus (`systemctl --user restart at-spi-dbus-bus.service`) fixes it for all apps.
 - Journals (`VJOURNAL`) and free/busy entries are not imported.
 
 ## License

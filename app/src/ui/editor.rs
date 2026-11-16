@@ -582,60 +582,8 @@ pub fn open_event(
     {
         let (w, app) = (window.clone(), app.clone());
         let uid = item.uid.clone();
-        let summary = item.summary.clone();
-        let recurring = item.rrule.is_some();
-        let all = item.is_all_day();
         delete.connect_clicked(move |_| {
-            let (app2, w2, uid2) = (app.clone(), w.clone(), uid.clone());
-            let delete_all = move || {
-                app2.change(|s| {
-                    s.delete_item(&uid2);
-                });
-                app2.set_status("Event deleted");
-                w2.close();
-            };
-            match (recurring, occurrence) {
-                (true, Some(occ)) => {
-                    let dialog = gtk::AlertDialog::builder()
-                        .message(format!("Delete \"{summary}\"?"))
-                        .detail("This event repeats.")
-                        .buttons(["Only This Occurrence", "All Occurrences", "Cancel"])
-                        .cancel_button(2)
-                        .default_button(2)
-                        .modal(true)
-                        .build();
-                    let (app3, w3, uid3) = (app.clone(), w.clone(), uid.clone());
-                    dialog.choose(
-                        Some(&w),
-                        gtk::gio::Cancellable::NONE,
-                        move |res| match res {
-                            Ok(0) => {
-                                app3.change(|s| {
-                                    if let Some(i) = s.items.get_mut(&uid3) {
-                                        i.exdates.push(if all {
-                                            When::Date(occ.date())
-                                        } else {
-                                            When::DateTime(occ)
-                                        });
-                                        i.touch();
-                                    }
-                                });
-                                app3.set_status("Occurrence deleted");
-                                w3.close();
-                            }
-                            Ok(1) => delete_all(),
-                            _ => {}
-                        },
-                    );
-                }
-                _ => widgets::confirm(
-                    &w,
-                    &format!("Delete \"{summary}\"?"),
-                    "",
-                    "Delete",
-                    delete_all,
-                ),
-            }
+            confirm_delete(&app, &uid, occurrence, &w, Some(w.clone()));
         });
     }
     window.present();
@@ -805,23 +753,80 @@ pub fn open_task(app: &Rc<App>, existing: Option<Item>, template: Option<Item>) 
     {
         let (w, app) = (window.clone(), app.clone());
         let uid = item.uid.clone();
-        let summary = item.summary.clone();
         delete.connect_clicked(move |_| {
-            let (app, w2, uid) = (app.clone(), w.clone(), uid.clone());
-            widgets::confirm(
-                &w,
-                &format!("Delete \"{summary}\"?"),
-                "",
-                "Delete",
-                move || {
-                    app.change(|s| {
-                        s.delete_item(&uid);
-                    });
-                    app.set_status("Task deleted");
-                    w2.close();
-                },
-            );
+            confirm_delete(&app, &uid, None, &w, Some(w.clone()));
         });
     }
     window.present();
+}
+
+/// Ask before deleting an event or task. For one occurrence of a repeating event, offer to
+/// delete only that occurrence. `close` is closed after deleting (the editor).
+pub fn confirm_delete(
+    app: &Rc<App>,
+    uid: &str,
+    occurrence: Option<NaiveDateTime>,
+    parent: &gtk::Window,
+    close: Option<gtk::Window>,
+) {
+    let Some(item) = app.store.borrow().items.get(uid).cloned() else {
+        return;
+    };
+    let what = if item.kind == opencal::Kind::Task {
+        "Task"
+    } else {
+        "Event"
+    };
+    let message = format!("Delete \"{}\"?", item.summary);
+    let delete_all = {
+        let (app, uid, close) = (app.clone(), uid.to_string(), close.clone());
+        move || {
+            app.change(|s| {
+                s.delete_item(&uid);
+            });
+            app.set_status(&format!("{what} deleted"));
+            if let Some(w) = &close {
+                w.close();
+            }
+        }
+    };
+    match (item.rrule.is_some(), occurrence) {
+        (true, Some(occ)) => {
+            let dialog = gtk::AlertDialog::builder()
+                .message(message)
+                .detail("This event repeats.")
+                .buttons(["Only This Occurrence", "All Occurrences", "Cancel"])
+                .cancel_button(2)
+                .default_button(2)
+                .modal(true)
+                .build();
+            let (app, uid) = (app.clone(), uid.to_string());
+            let all_day = item.is_all_day();
+            dialog.choose(
+                Some(parent),
+                gtk::gio::Cancellable::NONE,
+                move |res| match res {
+                    Ok(0) => {
+                        app.change(|s| {
+                            if let Some(i) = s.items.get_mut(&uid) {
+                                i.exdates.push(if all_day {
+                                    When::Date(occ.date())
+                                } else {
+                                    When::DateTime(occ)
+                                });
+                                i.touch();
+                            }
+                        });
+                        app.set_status("Occurrence deleted");
+                        if let Some(w) = &close {
+                            w.close();
+                        }
+                    }
+                    Ok(1) => delete_all(),
+                    _ => {}
+                },
+            );
+        }
+        _ => widgets::confirm(parent, &message, "", "Delete", delete_all),
+    }
 }

@@ -1,5 +1,8 @@
 #![allow(clippy::type_complexity, clippy::explicit_counter_loop)]
 
+mod a11y;
+mod autostart;
+mod tray;
 mod ui;
 
 use std::cell::Cell;
@@ -12,16 +15,18 @@ use gtk::prelude::*;
 use gtk::{gdk, gio, glib};
 use opencal::{Config, Item, Paths, When, ics, sync};
 
-const APP_ID: &str = "org.opencal.OpenCal";
+pub const APP_ID: &str = "org.opencal.OpenCal";
 
 const HELP: &str = "\
 opencal - local calendar and task manager
 
 Usage: opencal [--profile DIR] [COMMAND]
 
-Without a command, opens the calendar window.
+Without a command, opens the calendar window. If opencal is already running (also in the
+tray), its window is shown instead.
 
 Commands:
+  --background           Start in the tray without opening the window (used at login)
   --sync                 Run the configured sync (pull, merge, push) and print the changes
   --merge FILE           Merge another opencal calendar file into yours
   --import FILE          Import an .ics file (into a new calendar named after the file)
@@ -58,12 +63,10 @@ fn main() -> glib::ExitCode {
     let paths = Paths::new(profile.as_deref());
     let arg = |i: usize| args.get(i).map(String::as_str);
     let result = match arg(0) {
-        None => {
-            return run_gui(
-                paths,
-                profile.is_some()
-                    || std::env::var_os("OPENCAL_PROFILE").is_some_and(|p| !p.is_empty()),
-            );
+        None | Some("--background") => {
+            let separate = profile.is_some()
+                || std::env::var_os("OPENCAL_PROFILE").is_some_and(|p| !p.is_empty());
+            return run_gui(paths, separate, arg(0) == Some("--background"));
         }
         Some("-h" | "--help") => {
             print!("{HELP}");
@@ -228,7 +231,8 @@ fn load_css() {
     );
 }
 
-fn run_gui(paths: Paths, separate: bool) -> glib::ExitCode {
+fn run_gui(paths: Paths, separate: bool, background: bool) -> glib::ExitCode {
+    a11y::quiet_if_broken();
     // A profile is a separate calendar: don't hand over to an instance showing another one.
     let flags = if separate {
         gio::ApplicationFlags::NON_UNIQUE
@@ -241,14 +245,25 @@ fn run_gui(paths: Paths, separate: bool) -> glib::ExitCode {
         .build();
     application.connect_startup(|_| load_css());
     let paths = Rc::new(paths);
+    // Only the first activation may start hidden; later ones (another `opencal`) show it.
+    let first = Rc::new(Cell::new(true));
     application.connect_activate(move |application| {
-        if let Some(w) = application.active_window() {
+        if let Some(w) = application.windows().into_iter().next() {
+            w.set_visible(true);
             w.present();
             return;
         }
         let app = ui::App::new(application, (*paths).clone());
-        app.present();
+        app.start(!(background && first.replace(false)));
     });
+    // A second `opencal --background` (e.g. login autostart while already running) does nothing.
+    if background
+        && !separate
+        && application.register(gio::Cancellable::NONE).is_ok()
+        && application.is_remote()
+    {
+        return glib::ExitCode::SUCCESS;
+    }
     application.run_with_args(&["opencal"])
 }
 
@@ -368,6 +383,44 @@ fn self_test() -> glib::ExitCode {
                 let _ = gtk::prelude::WidgetExt::activate_action(&window, action, None);
                 if gtk::Window::list_toplevels().len() <= before {
                     eprintln!("self-test failed: {action} opened no window");
+                    passed = false;
+                }
+            }
+            // Settings window and the right-click menus' actions.
+            for (action, target) in [
+                ("win.settings", None),
+                ("win.new-event-on", Some(day.format("%Y-%m-%d").to_string())),
+                (
+                    "win.new-event-at",
+                    Some(format!("{}T10:30", day.format("%Y-%m-%d"))),
+                ),
+                (
+                    "win.new-allday-on",
+                    Some(day.format("%Y-%m-%d").to_string()),
+                ),
+                ("win.new-task-on", Some(day.format("%Y-%m-%d").to_string())),
+            ] {
+                let before = gtk::Window::list_toplevels().len();
+                let target = target.map(|t| t.to_variant());
+                let _ = gtk::prelude::WidgetExt::activate_action(&window, action, target.as_ref());
+                if gtk::Window::list_toplevels().len() <= before {
+                    eprintln!("self-test failed: {action} opened no window");
+                    passed = false;
+                }
+            }
+            if let Some(app) = weak.upgrade() {
+                let uid = app
+                    .store
+                    .borrow()
+                    .items
+                    .keys()
+                    .next()
+                    .cloned()
+                    .unwrap_or_default();
+                if app.day_menu(day, None).n_items() == 0
+                    || app.item_menu(&uid, None).n_items() == 0
+                {
+                    eprintln!("self-test failed: empty context menu");
                     passed = false;
                 }
             }

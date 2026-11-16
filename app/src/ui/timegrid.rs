@@ -229,6 +229,32 @@ impl TimeGrid {
             }
         });
         header.add_controller(click);
+
+        let menu_click = gtk::GestureClick::builder().button(3).build();
+        let st = state.clone();
+        let area = header.clone();
+        menu_click.connect_pressed(move |g, _, x, y| {
+            let Some(app) = st.app.upgrade() else { return };
+            if x < GUTTER {
+                return;
+            }
+            g.set_state(gtk::EventSequenceState::Claimed);
+            let hit = st
+                .header_hits
+                .borrow()
+                .iter()
+                .find(|h| h.contains(x, y))
+                .cloned();
+            let menu = match hit {
+                Some(h) => app.item_menu(&h.uid, Some(h.start)),
+                None => app.day_menu(
+                    st.start.get() + Duration::days(st.day_index(x, area.width() as f64)),
+                    None,
+                ),
+            };
+            super::popup_menu(&area, &menu, x, y);
+        });
+        header.add_controller(menu_click);
     }
 
     fn setup_body_input(state: &Rc<State>, body: &gtk::DrawingArea) {
@@ -349,6 +375,37 @@ impl TimeGrid {
             }
         });
         body.add_controller(click);
+
+        // Right click: the event's menu, or "New Event at HH:MM" on empty space.
+        let menu_click = gtk::GestureClick::builder().button(3).build();
+        let st = state.clone();
+        let area = body.clone();
+        menu_click.connect_pressed(move |g, _, x, y| {
+            let Some(app) = st.app.upgrade() else { return };
+            if x < GUTTER {
+                return;
+            }
+            g.set_state(gtk::EventSequenceState::Claimed);
+            let hit = st
+                .hits
+                .borrow()
+                .iter()
+                .rev()
+                .find(|h| h.contains(x, y))
+                .cloned();
+            let menu = match hit {
+                Some(h) => app.item_menu(&h.uid, Some(h.start)),
+                None => {
+                    let t = st.time_at(x, y, area.width() as f64);
+                    let t = t
+                        .with_minute(if t.minute() >= 30 { 30 } else { 0 })
+                        .unwrap_or(t);
+                    app.day_menu(t.date(), Some(t))
+                }
+            };
+            super::popup_menu(&area, &menu, x, y);
+        });
+        body.add_controller(menu_click);
 
         let motion = gtk::EventControllerMotion::new();
         let st = state.clone();

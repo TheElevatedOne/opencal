@@ -158,6 +158,17 @@ impl MonthView {
             }
         });
         cell.add_controller(click);
+        // Right click: the "New" menu for this day.
+        let menu_click = gtk::GestureClick::builder().button(3).build();
+        let a = self.app.clone();
+        let c = cell.clone();
+        menu_click.connect_pressed(move |g, _, x, y| {
+            g.set_state(gtk::EventSequenceState::Claimed);
+            if let Some(app) = a.upgrade() {
+                super::popup_menu(&c, &app.day_menu(day, None), x, y);
+            }
+        });
+        cell.add_controller(menu_click);
         cell
     }
 
@@ -198,6 +209,17 @@ impl MonthView {
         }
         let uid = o.uid.clone();
         let start = o.start;
+        {
+            let menu_click = gtk::GestureClick::builder().button(3).build();
+            let (a, b, uid) = (self.app.clone(), button.clone(), uid.clone());
+            menu_click.connect_pressed(move |g, _, x, y| {
+                g.set_state(gtk::EventSequenceState::Claimed);
+                if let Some(app) = a.upgrade() {
+                    super::popup_menu(&b, &app.item_menu(&uid, Some(start)), x, y);
+                }
+            });
+            button.add_controller(menu_click);
+        }
         let a = self.app.clone();
         button.connect_clicked(move |_| {
             if let Some(app) = a.upgrade() {

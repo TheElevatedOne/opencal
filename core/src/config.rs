@@ -8,9 +8,40 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
+    pub app: AppConfig,
     pub storage: StorageConfig,
     pub sync: SyncConfig,
     pub view: ViewConfig,
+    pub reminders: RemindersConfig,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AppConfig {
+    /// Keep running with a tray icon when the window is closed (reminders and timed sync keep
+    /// working). Quit from the tray menu or with Ctrl+Q.
+    pub background: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct RemindersConfig {
+    /// Desktop notification before events start.
+    pub events: bool,
+    /// Minutes before the start (0 = at the start).
+    pub minutes_before: u32,
+    /// Desktop notification when a task is due (date-only tasks: at `view.day_start_hour`).
+    pub tasks: bool,
+}
+
+impl Default for RemindersConfig {
+    fn default() -> Self {
+        RemindersConfig {
+            events: true,
+            minutes_before: 10,
+            tasks: true,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -32,8 +63,10 @@ pub struct SyncConfig {
     /// Run the push even when the remote copy already has everything.
     pub always_push: bool,
     pub on_start: bool,
-    /// Sync every N minutes while the window is open (0 = off).
+    /// Sync every N minutes while opencal runs (0 = off).
     pub interval_minutes: u32,
+    /// Sync this many seconds after the last change (0 = off).
+    pub after_change_seconds: u32,
     /// Kill a command that runs longer than this.
     pub timeout_seconds: u64,
 }
@@ -46,6 +79,7 @@ impl Default for SyncConfig {
             always_push: false,
             on_start: false,
             interval_minutes: 0,
+            after_change_seconds: 0,
             timeout_seconds: 300,
         }
     }
@@ -65,6 +99,10 @@ pub struct ViewConfig {
     pub width: i32,
     pub height: i32,
     pub sidebar: bool,
+    /// Length of new events, in minutes.
+    pub event_minutes: u32,
+    /// UID of the calendar new events and tasks go to (empty = the first visible one).
+    pub default_calendar: String,
     /// Width of the sidebar in pixels.
     pub sidebar_width: i32,
 }
@@ -80,6 +118,8 @@ impl Default for ViewConfig {
             width: 1100,
             height: 720,
             sidebar: true,
+            event_minutes: 60,
+            default_calendar: String::new(),
             sidebar_width: 260,
         }
     }

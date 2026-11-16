@@ -221,3 +221,54 @@ paned > separator {
   min-width: 1px;
   background-color: @borders;
 }
+
+/* Menus (popovers): GTK 4 paints them on popover > contents and the rows are modelbuttons,
+   so the theme's colours are applied here explicitly. */
+popover > contents,
+popover > arrow {
+  background-color: @theme_bg_color;
+  color: @theme_fg_color;
+  border: 1px solid @borders;
+  box-shadow: none;
+}
+
+popover.menu modelbutton {
+  color: @theme_fg_color;
+  padding: 4px 10px;
+}
+
+popover.menu modelbutton:hover,
+popover.menu modelbutton:selected,
+popover.menu modelbutton:focus {
+  background-color: @theme_selected_bg_color;
+  color: @theme_selected_fg_color;
+}
+
+popover.menu modelbutton:disabled {
+  opacity: 0.5;
+}
+
+popover.menu separator {
+  background-color: @borders;
+  min-height: 1px;
+}
+
+/* Settings window */
+.settings-sidebar {
+  min-width: 150px;
+}
+
+.settings-sidebar list,
+.settings-sidebar list > row {
+  background-color: @theme_bg_color;
+  color: @theme_fg_color;
+}
+
+.settings-sidebar list > row:selected {
+  background-color: @theme_selected_bg_color;
+  color: @theme_selected_fg_color;
+}
+
+.settings-page {
+  padding: 16px 20px;
+}

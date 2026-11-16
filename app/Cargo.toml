@@ -17,3 +17,6 @@ anyhow.workspace = true
 chrono.workspace = true
 gtk = { package = "gtk4", version = "0.11", features = ["v4_14"] }
 pangocairo = "0.22"
+async-channel = "2"
+# Tray icon (StatusNotifierItem); its own thread, no async runtime needed.
+ksni = { version = "0.3", default-features = false, features = ["blocking", "async-io"] }

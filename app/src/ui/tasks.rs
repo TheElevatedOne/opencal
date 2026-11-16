@@ -72,6 +72,22 @@ impl TasksView {
                 app.open_item(&uid, None);
             }
         });
+        let menu_click = gtk::GestureClick::builder().button(3).build();
+        let (r, a, l) = (rows.clone(), app.weak(), list.clone());
+        menu_click.connect_pressed(move |_, _, x, y| {
+            let Some(row) = l.row_at_y(y as i32) else {
+                return;
+            };
+            let uid = r
+                .borrow()
+                .get(row.index() as usize)
+                .cloned()
+                .filter(|u| !u.is_empty());
+            if let (Some(uid), Some(app)) = (uid, a.upgrade()) {
+                super::popup_menu(&l, &app.item_menu(&uid, None), x, y);
+            }
+        });
+        list.add_controller(menu_click);
         TasksView {
             widget,
             list,

@@ -17,3 +17,10 @@ First release.
 - Added: import and export of `.ics` files, and merging another opencal file.
 - Added: command line: `--sync`, `--merge`, `--import`, `--export`, `--agenda`, `--add-task`, `--path`.
 - Added: `libopencal.so` with a C header and pkg-config file, and the `opencal` Rust crate.
+- Added: Settings window (General, Calendar, Reminders, Sync, Storage).
+- Added: running in the background with a tray icon, start at login (`--background`), and a single instance:
+  starting opencal again shows the running window.
+- Added: reminder notifications before events and when tasks are due.
+- Added: automatic sync after changes, besides at start and every N minutes.
+- Added: right-click menus on days, hours and entries; the sidebar can be resized.
+- Added: menus are painted with the GTK theme's colours.
